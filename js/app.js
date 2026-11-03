@@ -308,7 +308,7 @@ function renderChecks() {
 let io;
 function observe() {
   if (reduced || !("IntersectionObserver" in window)) { $$("[data-reveal]").forEach((el) => el.classList.add("in")); fillBars(); return; }
-  io ||= new IntersectionObserver((entries) => {
+  if (!io) io = new IntersectionObserver((entries) => {
     for (const e of entries) if (e.isIntersecting) {
       e.target.classList.add("in");
       $$(".cbar i", e.target).forEach((b) => { b.style.width = `${b.dataset.w}%`; });
@@ -470,6 +470,21 @@ function bind() {
 }
 
 function init() {
+  const root = document.documentElement;
+  root.classList.add("js-ready");
+  try {
+    boot();
+    window.__appReady = true;
+  } catch (e) {
+    // 초기화가 중간에 실패하면 숨김을 풀어 내용이라도 보이게 하고, 안내 문구가 원인을 보여 준다
+    root.classList.remove("js-ready");
+    if (window.__bootErrors) window.__bootErrors.push(e.message);
+    throw e;
+  }
+  requestAnimationFrame(() => requestAnimationFrame(() => root.classList.add("is-loaded")));
+}
+
+function boot() {
   try {
     const saved = JSON.parse(localStorage.getItem(STORE) || "null");
     if (saved?.text) $("#src").value = saved.text;
@@ -483,7 +498,6 @@ function init() {
   observe();
   parallax();
   cursor();
-  requestAnimationFrame(() => document.documentElement.classList.add("is-loaded"));
 }
 
 init();

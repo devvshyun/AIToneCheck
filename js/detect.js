@@ -6,7 +6,7 @@ const QUOTE_LINE = /^\s*["“「〈『'‘]/;
 export function detectGenre(input) {
   const text = input.normalize("NFC");
   const lines = text.split("\n").map((l) => l.trim()).filter(Boolean);
-  const sentences = text.split(/(?<=[.!?。])\s+|\n+/).map((s) => s.trim()).filter((s) => /[가-힣]/.test(s));
+  const sentences = (text.match(/[^.!?。\n]+[.!?。]*/g) || []).map((s) => s.trim()).filter((s) => /[가-힣]/.test(s));
   const n = Math.max(1, sentences.length);
   const L = Math.max(1, lines.length);
 
@@ -15,8 +15,8 @@ export function detectGenre(input) {
   const formal = sentences.filter((s) => /(니다|니까|세요|에요|예요|해요|어요|아요|죠)[.!?]?["'”’]?$/.test(s)).length;
   const plain = sentences.filter((s) => /다[.!?]?["'”’]?$/.test(s)).length;
   const past = sentences.filter((s) => /[었았였했갔왔쳤렸졌]다[.!?]?["'”’]?$/.test(s)).length;
-  const firstPerson = (text.match(/(?<![가-힣])(나는|내가|나의|내\s|나도|나를|나에게|우리는|우리가)/g) || []).length;
-  const thirdPerson = (text.match(/(?<![가-힣])(그는|그녀는|그가|그녀가|그의|그녀의|그를|그녀를)/g) || []).length;
+  const firstPerson = (text.match(/(?:^|[^가-힣])(나는|내가|나의|내\s|나도|나를|나에게|우리는|우리가)/g) || []).length;
+  const thirdPerson = (text.match(/(?:^|[^가-힣])(그는|그녀는|그가|그녀가|그의|그녀의|그를|그녀를)/g) || []).length;
   const structure = lines.filter((l) => /^(#{1,6}\s|[-*•○□■◦▶※]\s?|\d+[.)]\s|[①-⑳]|[가-하]\.\s)/.test(l)).length;
   // 문장 부호 없이 끝나는 짧은 줄 = 제목·항목·표 칸
   const labels = lines.filter((l) => l.length <= 24 && !/[.!?。"”']$/.test(l)).length;

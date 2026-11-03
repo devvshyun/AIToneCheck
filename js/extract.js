@@ -95,7 +95,7 @@ function stripMarkdown(md) {
     .replace(/^\s*\|?[-:| ]+\|?\s*$/gm, "")         // 표 구분선
     .replace(/\|/g, " ")
     .replace(/(\*\*|__)(.+?)\1/g, "$2")
-    .replace(/(?<![*\w])\*(?!\s)(.+?)\*(?!\w)/g, "$1")
+    .replace(/(^|[^*\w])\*(?!\s)(.+?)\*(?!\w)/gm, "$1$2")
     .replace(/<[^>]+>/g, "");
 }
 
@@ -289,7 +289,7 @@ function rtfToText(buf) {
 // ── PDF ────────────────────────────────────────────────────
 let pdfjsPromise;
 async function pdf(buf) {
-  pdfjsPromise ||= import("../vendor/pdfjs/pdf.min.mjs").then((m) => {
+  if (!pdfjsPromise) pdfjsPromise = import("../vendor/pdfjs/pdf.min.mjs").then((m) => {
     m.GlobalWorkerOptions.workerSrc = new URL("../vendor/pdfjs/pdf.worker.min.mjs", import.meta.url).href;
     return m;
   });

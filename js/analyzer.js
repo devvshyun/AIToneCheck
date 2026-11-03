@@ -23,7 +23,7 @@ const CONNECTIVES = [
   { key: "-서 (어·아·해·라서)", re: /[어아해라]서(?=[\s,])/g },
   { key: "더니", re: /더니(?=[\s,])/g },
   { key: "지만", re: /지만(?=[\s,])/g },
-  { key: "다가", re: /(?<![가-힣]{2}에)다가(?=[\s,])/g },
+  { key: "다가", re: /[^에\s]다가(?=[\s,])/g }, // '~에다가'는 조사라서 뺀다
 ];
 // 문장이 서술어로 끝나는지 (A2 명사 조각 판정용, 마지막 음절 기준 근사)
 const PREDICATE_END = /[다요까죠네지군어아야니라자게걸데고며면서나래해대냐오소세마든고야지]$/;
@@ -136,8 +136,10 @@ export function analyze(input, genre = "auto") {
     let m;
     while ((m = rule.re.exec(text)) !== null) {
       if (!m[0].length) { rule.re.lastIndex++; continue; }
-      const lead = m[0].search(/[^\s.,!?\n]/);
-      const start = m.index + Math.max(0, lead);
+      // (?<pre>...) 그룹은 lookbehind 대용으로 잡은 앞 글자라 하이라이트에서 뺀다
+      const preLen = m.groups?.pre?.length || 0;
+      const lead = m[0].slice(preLen).search(/[^\s.,!?\n]/);
+      const start = m.index + preLen + Math.max(0, lead);
       const end = m.index + m[0].length;
       if (scope === "narration" && inside(start, dialogueAll)) continue;
       if (scope === "dialogue" && !inside(start, dlg.lines)) continue;

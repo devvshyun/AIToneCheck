@@ -51,3 +51,13 @@ test("텍스트 파일 인코딩: UTF-8, UTF-16LE BOM, EUC-KR", () => {
   // '그게' EUC-KR 바이트
   assert.equal(decodeText(new Uint8Array([0xb1, 0xd7, 0xb0, 0xd4])), "그게");
 });
+
+test("구형 Safari(16.4 미만)에서 모듈 전체가 멈추지 않도록 정규식 lookbehind를 쓰지 않는다", async () => {
+  const { readFileSync, readdirSync } = await import("node:fs");
+  const dir = new URL("../js/", import.meta.url);
+  for (const f of readdirSync(dir).filter((x) => x.endsWith(".js"))) {
+    const src = readFileSync(new URL(f, dir), "utf8");
+    assert.ok(!/\(\?<[!=]/.test(src), `${f}에 lookbehind가 있습니다`);
+    assert.ok(!/(\|\||&&|\?\?)=/.test(src), `${f}에 논리 할당 연산자가 있습니다`);
+  }
+});
