@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AI 톤 체크</title>
+  <meta name="description" content="한국어 글에서 AI가 쓴 것처럼 느껴지는 버릇을 찾아 위치·이유·고친 안을 보여 주는 브라우저 전용 검수 도구">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <header class="top">
+    <div class="wrap">
+      <h1>AI 톤 체크</h1>
+      <p class="motto">AI 티는 '틀린 문장'이 아니라 '사람이 안 하는 버릇'이다.</p>
+      <p class="sub">글을 넣으면 AI 같은 버릇이 어디에 몰려 있는지 짚고 고친 안을 보여 줍니다. 모든 분석은 브라우저 안에서만 돌고, 입력한 글은 어디로도 보내지 않습니다.</p>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <!-- 입력 -->
+    <section class="card" id="input-card">
+      <div class="row between wrap-gap">
+        <div class="seg" role="radiogroup" aria-label="장르" id="genre"></div>
+        <div class="samples" id="samples"><span class="muted">예문</span></div>
+      </div>
+      <textarea id="src" rows="12" placeholder="검사할 글을 붙여 넣으세요. 소설·단편·에세이 서술 기준이며, 대사(따옴표로 시작하는 줄)는 서술과 따로 셉니다."></textarea>
+      <div class="row between">
+        <span class="muted" id="count">0자</span>
+        <div class="row gap">
+          <button class="ghost" id="clear" type="button">지우기</button>
+          <button class="primary" id="run" type="button">진단하기</button>
+        </div>
+      </div>
+    </section>
+
+    <div id="results" hidden>
+      <!-- 1. 판정 -->
+      <section class="card verdict" id="verdict"></section>
+
+      <!-- 5. 요약 피드백 -->
+      <section class="card">
+        <h2>가장 많이 나온 버릇</h2>
+        <ol class="top3" id="top3"></ol>
+      </section>
+
+      <!-- 2. 수치 -->
+      <section class="card">
+        <div class="row between">
+          <h2>전체 진단 수치</h2>
+          <span class="tag">합격선 아님 · 읽을 자리 안내</span>
+        </div>
+        <div class="metrics" id="metrics"></div>
+        <div id="connectives"></div>
+      </section>
+
+      <!-- 3. 하이라이트 + 상세 -->
+      <section class="card">
+        <div class="row between wrap-gap">
+          <h2>문장별 하이라이트</h2>
+          <div class="legend">
+            <span><i class="sw s1"></i>S1 강함</span>
+            <span><i class="sw s2"></i>S2 중간</span>
+            <span><i class="sw s3"></i>S3 약함</span>
+          </div>
+        </div>
+        <p class="muted small">밑줄 친 곳을 누르면 신호 번호·이유·고친 안이 나옵니다. 정규식으로 뽑은 <b>후보</b>라서 문맥상 정상일 수 있습니다.</p>
+        <div class="split">
+          <div class="doc" id="doc" tabindex="0"></div>
+          <aside class="detail" id="detail">
+            <p class="muted">하이라이트나 아래 신호 목록에서 항목을 고르세요.</p>
+          </aside>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>신호 목록</h2>
+        <div id="signals"></div>
+      </section>
+
+      <!-- 4. 고친 안 -->
+      <section class="card">
+        <div class="row between wrap-gap">
+          <h2>고친 안 고르기</h2>
+          <div class="row gap">
+            <button class="ghost small-btn" id="all-keep" type="button">모두 원문 유지</button>
+            <button class="ghost small-btn" id="all-apply" type="button">모두 적용</button>
+          </div>
+        </div>
+        <p class="muted small">기계적으로 바꿀 수 있는 것만 제안합니다. 기본값은 <b>원문 유지</b>이고, 적용할지는 직접 고릅니다. 나머지 신호는 처방을 보고 손으로 고치세요.</p>
+        <div id="suggestions"></div>
+        <div class="compare">
+          <div>
+            <h3>원문 (변경 표시)</h3>
+            <div class="doc diffdoc" id="diff-before"></div>
+          </div>
+          <div>
+            <h3>수정본 <span class="muted small">직접 고쳐도 됩니다</span></h3>
+            <textarea id="revised" rows="12"></textarea>
+          </div>
+        </div>
+        <div class="row end gap">
+          <button class="ghost" id="copy-revised" type="button">수정본 복사</button>
+          <button class="primary" id="recheck" type="button">수정본 2차 검수</button>
+        </div>
+      </section>
+
+      <!-- 6. 2차 검수 -->
+      <section class="card" id="second" hidden>
+        <h2>2차 검수 — 버릇 바꿔치기 점검</h2>
+        <p class="muted small">버릇 하나를 지우면 그 자리를 다른 버릇이 메웁니다. 고친 글을 같은 기준으로 다시 돌린 결과입니다.</p>
+        <div id="second-body"></div>
+      </section>
+
+      <section class="card">
+        <h2>읽어서 확인할 항목</h2>
+        <p class="muted small">스캔으로는 못 잡는 신호입니다. 직접 읽으며 체크하세요.</p>
+        <ul class="checklist" id="readonly"></ul>
+      </section>
+
+      <section class="card">
+        <div class="row between wrap-gap">
+          <h2>LLM 검수 프롬프트</h2>
+          <button class="ghost" id="copy-prompt" type="button">프롬프트 복사</button>
+        </div>
+        <p class="muted small">이 데모는 서버 없이 돌아서 LLM을 직접 부르지 않습니다. 읽어야 잡히는 신호까지 보려면 이 프롬프트를 Claude 등 챗봇에 붙여 넣으세요. 스캐너가 찾은 후보와 검수 원칙이 함께 들어갑니다.</p>
+        <details>
+          <summary>미리 보기</summary>
+          <pre id="prompt"></pre>
+        </details>
+      </section>
+    </div>
+  </main>
+
+  <footer class="wrap foot">
+    <p>기준: Novel 저장소 <code>ai-tone/기준.md</code> 액기스 (<a href="docs/ai-tone-essence.md">docs/ai-tone-essence.md</a>). 번역투·설명문 보조 규칙: <a href="https://github.com/epoko77-ai/im-not-ai">im-not-ai</a>, <a href="https://github.com/leeandev/stop-slop-ko">stop-slop-ko</a> (MIT), 쉼표 통계 KatFish (ACL 2025).</p>
+    <p>이 도구는 "AI가 썼다/사람이 썼다"를 판결하지 않습니다. 신호를 보여 주고 판단은 쓰는 사람에게 남깁니다.</p>
+  </footer>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
