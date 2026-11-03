@@ -3,8 +3,40 @@
 
 const QUOTE_LINE = /^\s*["“「〈『'‘]/;
 
+// 시나리오·대본 형식
+//   씬 머리:  S#1. 장소 / 낮,  #12,  씬 3,  INT. / EXT.
+//   대사 줄:  이름[탭]대사,  이름: 대사      (이름은 12자 이내)
+//   이어지는 대사: 탭으로 시작하는 줄
+export const SCENE_HEAD = /^\s*(?:S#\s?\d+|s#\s?\d+|#\s?\d+\.|씬\s?\d+|SCENE\s?\d+|INT\.|EXT\.)/;
+export const SPEAKER_LINE = /^[가-힣A-Za-z][가-힣A-Za-z0-9 ·.()]{0,11}(?:\t+|\s*[:：]\s)\S/;
+export const CONT_LINE = /^\t+\S/;
+
+export function scriptInfo(text) {
+  const lines = text.split("\n");
+  const nonEmpty = lines.filter((l) => l.trim()).length || 1;
+  const scenes = lines.filter((l) => SCENE_HEAD.test(l)).length;
+  const speakers = lines.filter((l) => SPEAKER_LINE.test(l)).length;
+  // '이름: 값' 꼴은 설명문에도 흔하므로 씬 머리가 있거나 대사 줄이 충분히 많을 때만 대본으로 본다
+  const isScript = scenes >= 2 || (speakers >= 8 && speakers / nonEmpty >= 0.2);
+  return { isScript, scenes, speakers };
+}
+
+export function isDialogueLine(line, script) {
+  return QUOTE_LINE.test(line) || (script && (SPEAKER_LINE.test(line) || CONT_LINE.test(line)));
+}
+
 export function detectGenre(input) {
   const text = input.normalize("NFC");
+  const script = scriptInfo(text);
+  if (script.isScript) {
+    return {
+      genre: "screenplay",
+      confidence: 1,
+      scores: { screenplay: 1 },
+      reasons: [`씬 머리 ${script.scenes}개`, `대사 줄 ${script.speakers}줄`],
+      runnerUp: null,
+    };
+  }
   const lines = text.split("\n").map((l) => l.trim()).filter(Boolean);
   const sentences = (text.match(/[^.!?。\n]+[.!?。]*/g) || []).map((s) => s.trim()).filter((s) => /[가-힣]/.test(s));
   const n = Math.max(1, sentences.length);

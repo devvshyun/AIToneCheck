@@ -7,7 +7,7 @@
 //  4. 리듬 기준은 길이가 아니라 섞임 → CV, 15자↓·70자↑ 비율을 함께 본다
 
 import { RULES, GROUPS, SWAPS, DELETE_SENTENCE } from "./rules.js";
-import { detectGenre } from "./detect.js";
+import { detectGenre, scriptInfo, isDialogueLine, SCENE_HEAD } from "./detect.js";
 
 export const SEV = {
   1: { key: "S1", label: "강함" },
@@ -16,7 +16,6 @@ export const SEV = {
 };
 const WEIGHT = { 1: 3, 2: 2, 3: 1 };
 
-const QUOTE_START = /^\s*["“「〈『'‘]/;
 const CONNECTIVES = [
   { key: "는데", re: /[가-힣]?는데(?=[\s,.])/g },
   { key: "-고 (었·았·였고)", re: /[었았였]고(?=[\s,])/g },
@@ -61,19 +60,24 @@ function paragraphs(text) {
   return out;
 }
 
-// 대사 범위: 따옴표로 시작하는 줄 전체 + 서술 줄 안의 인용 구간
+// 대사 범위: 따옴표로 시작하는 줄, 대본의 '이름[탭]대사' 줄과 이어지는 줄, 서술 줄 안의 인용 구간.
+// 대본의 씬 머리(S#1. 장소 / 낮)는 서술 지표에서 뺀다.
 export function dialogueRanges(text) {
   const lines = [];
   const inline = [];
+  const headings = [];
+  const script = scriptInfo(text).isScript;
   for (const l of lineRanges(text)) {
-    if (QUOTE_START.test(l.text)) lines.push(l);
+    // 씬 머리, 목록 항목, 마크다운 제목은 서술 문장으로 세지 않는다
+    if ((script && SCENE_HEAD.test(l.text)) || /^\s*(?:[-*•]\s|#{1,6}\s)/.test(l.text)) headings.push(l);
+    else if (isDialogueLine(l.text, script)) lines.push(l);
     else {
       const re = /“[^”\n]*”|"[^"\n]*"|「[^」\n]*」/g;
       let m;
       while ((m = re.exec(l.text)) !== null) inline.push({ start: l.start + m.index, end: l.start + m.index + m[0].length });
     }
   }
-  return { lines, inline };
+  return { lines, inline, headings, script };
 }
 
 const inside = (pos, ranges) => ranges.some((r) => pos >= r.start && pos < r.end);
@@ -81,13 +85,13 @@ const inside = (pos, ranges) => ranges.some((r) => pos >= r.start && pos < r.end
 // ── 수치 지표 (서술 문단만, 2장) ─────────────────────────────
 export function computeMetrics(text, dlg = dialogueRanges(text)) {
   const all = splitSentences(text);
-  const narr = all.filter((s) => !inside(s.start, dlg.lines));
+  const narr = all.filter((s) => !inside(s.start, dlg.lines) && !inside(s.start, dlg.headings || []));
   const lens = narr.map((s) => s.text.length);
   const n = narr.length;
   const mean = n ? lens.reduce((a, b) => a + b, 0) / n : 0;
   const sd = n ? Math.sqrt(lens.reduce((a, b) => a + (b - mean) ** 2, 0) / n) : 0;
 
-  const paras = paragraphs(text).filter((p) => !QUOTE_START.test(p.text));
+  const paras = paragraphs(text).filter((p) => !isDialogueLine(p.text, dlg.script) && !(dlg.script && SCENE_HEAD.test(p.text)));
   const oneLine = paras.filter((p) => p.text.trim().length <= 20 && (p.text.match(/[.!?。]/g) || []).length === 1);
 
   const narrText = narr.map((s) => s.text).join(" ");
@@ -151,7 +155,8 @@ export function analyze(input, genre = "auto") {
 
   findings.push(...metricFindings(text, metrics, genre));
 
-  for (const f of findings) f.sev = effectiveSev(f.baseSev, f.count);
+  // weakest가 있으면 빈도가 많아도 그 등급보다 강하게 올리지 않는다
+  for (const f of findings) f.sev = Math.max(effectiveSev(f.baseSev, f.count), f.weakest || 1);
   findings.sort((a, b) => a.sev - b.sev || b.count - a.count);
 
   const verdict = verdictOf(findings, metrics);
@@ -192,7 +197,9 @@ function metricFindings(text, m, genre) {
   if (story && m.sentences >= 6 && m.shortRatio >= 0.35) {
     const spans = [];
     let run = [];
-    const flush = () => { if (run.length >= 3) spans.push(...run.map(S)); run = []; };
+    // 시나리오 지문은 짧게 끊어 쓰는 게 관례라 4문장 이상 이어질 때만 본다
+    const need = genre === "screenplay" ? 4 : 3;
+    const flush = () => { if (run.length >= need) spans.push(...run.map(S)); run = []; };
     for (const s of m.narr) {
       const prev = run[run.length - 1];
       const contiguous = !prev || !/\n\s*\n/.test(text.slice(prev.end, s.start));
@@ -201,14 +208,14 @@ function metricFindings(text, m, genre) {
     }
     flush();
     if (spans.length) out.push(finding({
-      id: "A1", group: "A", sev: 2, name: "단문 끊어치기",
+      id: "A1", group: "A", sev: genre === "screenplay" ? 3 : 2, name: "단문 끊어치기",
       why: `서술 문장의 ${pct(m.shortRatio)}가 15자 이하입니다. 마침표가 박자를 만드는 '도왔다. 일찍 갔다. 다 도왔다.' 리듬.`,
       fix: "연결어미로 잇고, 끊는 건 시선을 멈출 한 자리만",
-    }, spans));
+    }, spans, genre === "screenplay" ? { weakest: 3 } : {}));
   }
 
-  // A2 명사 조각
-  if (story) {
+  // A2 명사 조각 (시나리오 지문은 "1시 58분." 같은 조각이 관례라 제외)
+  if (story && genre !== "screenplay") {
     const frags = m.narr.filter((s) => s.text.length <= 20 && /[.。]$/.test(s.text) &&
       !PREDICATE_END.test(s.text.replace(/[.。"'”’」)\]\s]+$/u, "")));
     if (frags.length >= 3) out.push(finding({
