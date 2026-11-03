@@ -285,7 +285,7 @@ function recheck() {
       <div class="side"><small>수정본</small><b>${c.after.per1k}</b><span>${esc(c.after.label)}</span></div>
     </div>
     <div class="alerts" data-reveal>${alerts.join("")}</div>
-    ${rows ? `<table class="delta" data-reveal><tbody>${rows}</tbody></table>` : ""}
+    ${rows ? `<table class="delta" data-reveal><thead><tr><th>항목</th><th class="n">원문</th><th class="n">수정본</th><th class="d">변화</th></tr></thead><tbody>${rows}</tbody></table>` : ""}
     <div class="actions" data-reveal><button class="btn" id="adopt" type="button"><span>수정본으로 다시 검사</span><i aria-hidden="true">↺</i></button></div>`;
   $("#second").hidden = false;
   $("#adopt").onclick = () => {
