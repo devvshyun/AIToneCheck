@@ -12,7 +12,7 @@
 
 | 요소 | 내용 |
 | --- | --- |
-| 서체 | 제목·본문 Pretendard(저장소에 포함, OFL), 검사할 글은 Noto Serif KR, 숫자는 Instrument Serif 이탤릭 |
+| 서체 | 제목·본문·숫자 Pretendard(저장소에 포함, OFL), 검사할 글만 Noto Serif KR |
 | 표시 | 밑줄 종류로 등급 구분: S1 실선, S2 물결, S3 점선. 문장 옆 항목 목록에 번호로 연결 |
 | 움직임 | 스크롤 페이드업, 제목 마스크 리빌, 커서 점, 밑줄 스윕·채움 호버. `prefers-reduced-motion`이면 모두 끔 |
 
