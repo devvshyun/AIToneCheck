@@ -7,6 +7,7 @@
 //  4. 리듬 기준은 길이가 아니라 섞임 → CV, 15자↓·70자↑ 비율을 함께 본다
 
 import { RULES, GROUPS, SWAPS, DELETE_SENTENCE } from "./rules.js";
+import { detectGenre } from "./detect.js";
 
 export const SEV = {
   1: { key: "S1", label: "강함" },
@@ -116,8 +117,11 @@ export function effectiveSev(base, count) {
 }
 
 // ── 메인 ───────────────────────────────────────────────────
-export function analyze(input, genre = "fiction") {
+// genre를 생략하거나 "auto"면 글을 보고 장르를 판단한다
+export function analyze(input, genre = "auto") {
   const text = input.normalize("NFC").replace(/\r\n?/g, "\n");
+  const detected = detectGenre(text);
+  if (!genre || genre === "auto") genre = detected.genre;
   const dlg = dialogueRanges(text);
   const dialogueAll = [...dlg.lines, ...dlg.inline];
   const metrics = computeMetrics(text, dlg);
@@ -149,7 +153,7 @@ export function analyze(input, genre = "fiction") {
   findings.sort((a, b) => a.sev - b.sev || b.count - a.count);
 
   const verdict = verdictOf(findings, metrics);
-  return { text, genre, findings, metrics, verdict, top: topHabits(findings) };
+  return { text, genre, detected, findings, metrics, verdict, top: topHabits(findings) };
 }
 
 function finding(rule, spans, extra = {}) {

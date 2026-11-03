@@ -49,7 +49,27 @@
 | K (설명문 관용구) | 같은 두 저장소 | 결산 접속어 반복, 의의 과장, "~할 때입니다", 안내형 상투구 |
 | F3 감정 직접 명명 | devvshyun/1day1writing `fiction_engine.py` 금지 목록 | "무서웠다", "소름이 돋았다" |
 
-장르(소설·단편 / 에세이·수필 / 칼럼·블로그·설명문)에 따라 적용 신호가 달라집니다. 수치 기준(15자·70자)은 산문 기준이라 UI 카피·광고문에는 맞지 않습니다.
+장르는 고르지 않습니다. `js/detect.js`가 대사 비율, 종결어미(~다 / ~습니다), 1·3인칭, 과거형 서술, 제목·목록 줄, 숫자 밀도 같은 겉모양으로 소설 / 에세이 / 설명문을 판단하고, 근거를 결과 화면에 함께 보여 줍니다. 소설과 에세이 근거가 비슷하면 "소설 또는 에세이"로 표시합니다. 판단 결과에 따라 적용 신호가 달라집니다. 수치 기준(15자·70자)은 산문 기준이라 UI 카피·광고문에는 맞지 않습니다.
+
+## 파일 업로드
+
+파일을 고르거나 입력창에 끌어다 놓으면 글을 꺼내 바로 검사합니다. 모든 처리는 브라우저 안에서 하고 서버로 보내지 않습니다.
+
+| 형식 | 처리 방식 |
+| --- | --- |
+| TXT, CSV, JSON, SRT, VTT, LOG | 인코딩 자동 판별 (UTF-8, UTF-16 BOM, EUC-KR/CP949) |
+| MD | 제목·목록·강조·링크·코드 블록 기호를 걷어 내고 본문만 |
+| HTML, XHTML, XML | script·style·nav 제거 후 블록 단위 줄바꿈 |
+| RTF | `\ansicpg949` 바이트와 `\u` 유니코드 모두 해석 |
+| DOCX, DOCM, DOTX | `word/document.xml` 본문 + 각주·미주 |
+| ODT, ODP | `content.xml` |
+| HWPX | `Contents/section*.xml` |
+| HWP (한글 5.0) | OLE 복합 파일에서 `BodyText/Section*`을 풀어 문단 텍스트 레코드(HWPTAG_PARA_TEXT)만 추출. 배포용·암호 문서는 미지원 |
+| PDF | pdf.js 텍스트 레이어. 스캔 이미지 PDF는 OCR이 필요해 미지원 |
+| EPUB | OPF spine 순서대로 장 본문 |
+| PPTX | 슬라이드 순서대로 텍스트 상자 |
+
+구형 바이너리 `.doc`, `.ppt`는 새 형식으로 저장해 올리도록 안내합니다. 20만 자가 넘으면 앞부분만 검사합니다.
 
 ## 구조
 
@@ -57,7 +77,10 @@
 index.html          화면
 css/style.css       스타일 (라이트/다크)
 fonts/pretendard/   Pretendard 가변 서체 동적 서브셋 (OFL)
+vendor/             fflate(MIT)·cfb(Apache-2.0) 번들, pdf.js 4.10.38(Apache-2.0) + CMap
 js/rules.js         신호 DB: 정규식, 등급, 처방, 고친 안 생성기, 버릇 바꿔치기 표
+js/detect.js        장르 자동 판단
+js/extract.js       파일 → 텍스트 추출 (형식별 파서)
 js/analyzer.js      대사 분리, 수치 지표, 신호 탐지, 빈도 가중, 판정, 2차 검수 비교 (DOM 무관)
 js/app.js           화면 렌더링·상호작용
 js/prompt.js        LLM 검수 프롬프트 생성

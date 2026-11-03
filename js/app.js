@@ -1,5 +1,7 @@
 import { analyze, compare, flattenSpans, applySuggestions, SEV } from "./analyzer.js";
 import { GENRES, READ_ONLY } from "./rules.js";
+import { detectGenre } from "./detect.js";
+import { extractText, ACCEPT, FORMAT_LABEL, ExtractError } from "./extract.js";
 import { SAMPLES } from "./samples.js";
 import { buildPrompt } from "./prompt.js";
 
@@ -10,7 +12,7 @@ const STORE = "aitonecheck:v1";
 const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 const state = {
-  genre: "fiction",
+  file: null, // 마지막으로 올린 파일 이름
   result: null,
   spans: [],
   suggestions: [],
@@ -20,9 +22,31 @@ const state = {
 };
 
 // ── 입력 ────────────────────────────────────────────────────
-function renderGenre() {
-  $("#genre").innerHTML = Object.entries(GENRES).map(([k, v]) =>
-    `<button type="button" role="radio" data-g="${k}" aria-checked="${k === state.genre}">${v}</button>`).join("");
+// 자동 판단 결과를 사람이 읽는 이름으로. 소설과 에세이가 비슷하면 둘 다 말한다.
+function genreLabel(d) {
+  const pair = new Set([d.genre, d.runnerUp]);
+  if (d.confidence < 0.65 && pair.has("fiction") && pair.has("essay")) return "소설 또는 에세이";
+  return GENRES[d.genre];
+}
+
+// 받침에 맞춰 '로/으로' (ㄹ 받침은 '로')
+function ro(word) {
+  const c = word.charCodeAt(word.length - 1) - 0xac00;
+  if (c < 0 || c > 11171) return "로";
+  const jong = c % 28;
+  return jong === 0 || jong === 8 ? "로" : "으로";
+}
+
+let detectTimer;
+function liveDetect() {
+  clearTimeout(detectTimer);
+  detectTimer = setTimeout(() => {
+    const t = $("#src").value;
+    const el = $("#detect-live");
+    if (t.replace(/\s/g, "").length < 40) { el.textContent = ""; return; }
+    const d = detectGenre(t);
+    el.innerHTML = `자동 판단 <b>${esc(genreLabel(d))}</b> <span>${esc(d.reasons.slice(0, 2).join(", "))}</span>`;
+  }, 250);
 }
 
 function renderSamples() {
@@ -33,14 +57,15 @@ function renderSamples() {
 function updateCount() {
   const t = $("#src").value;
   $("#count").innerHTML = `${t.replace(/\s/g, "").length.toLocaleString()}<small>자</small>`;
-  try { localStorage.setItem(STORE, JSON.stringify({ text: t, genre: state.genre })); } catch { /* 저장 불가 */ }
+  try { localStorage.setItem(STORE, JSON.stringify({ text: t })); } catch { /* 저장 불가 */ }
+  liveDetect();
 }
 
 // ── 실행 ───────────────────────────────────────────────────
 function run({ scroll = true } = {}) {
   const text = $("#src").value;
   if (!text.trim()) { toast("검사할 글을 먼저 넣어 주세요"); $("#src").focus(); return; }
-  const r = analyze(text, state.genre);
+  const r = analyze(text);
   state.result = r;
   state.spans = flattenSpans(r.findings);
   state.open = null;
@@ -86,7 +111,7 @@ function renderVerdict(r) {
     <div data-reveal style="--d:.18s">
       <div class="scale"><i style="left:0"></i></div>
       <div class="scale-labels"><span>적음</span><span>보통</span><span>많음</span></div>
-      <p class="v-facts">의심 표현 ${v.signals}종류를 ${v.groups}개 분류에서 찾았습니다. ${esc(GENRES[r.genre])} 기준입니다.</p>
+      <p class="v-facts">${v.signals ? `의심 표현 ${v.signals}종류를 ${v.groups}개 분류에서 찾았습니다.` : "의심 표현을 찾지 못했습니다."} 글 종류는 <b>${esc(genreLabel(r.detected))}</b>${ro(genreLabel(r.detected))} 판단했습니다(${esc(r.detected.reasons.join(", "))}).</p>
     </div>`;
   requestAnimationFrame(() => setTimeout(() => { $(".scale i", el).style.left = `${(pos * 100).toFixed(1)}%`; }, 300));
 }
@@ -242,7 +267,7 @@ function renderRevised() {
 function recheck() {
   const revised = $("#revised").value;
   if (!revised.trim()) { toast("수정본이 비어 있습니다"); return; }
-  const after = analyze(revised, state.genre);
+  const after = analyze(revised, state.result.genre); // 전후 비교는 같은 기준으로
   const c = compare(state.result, after);
   const alerts = [
     ...c.swaps.map((s) => `<div class="alert"><b>바꿔치기 의심</b>${esc(s.note)}<small>줄어든 신호 ${s.fromHit.join(", ")}, 늘어난 신호 ${s.toHit.join(", ")}</small></div>`),
@@ -349,23 +374,57 @@ async function copy(text, done) {
   }
 }
 
+// ── 파일 ───────────────────────────────────────────────────
+const MAX_CHARS = 200000;
+
+function setFileStatus(msg, isError = false) {
+  const el = $("#file-status");
+  el.textContent = msg;
+  el.classList.toggle("error", isError);
+}
+
+async function loadFile(file) {
+  if (!file) return;
+  if (file.size > 50 * 1024 * 1024) { setFileStatus("50MB가 넘는 파일은 올릴 수 없습니다.", true); return; }
+  setFileStatus(`${file.name} 읽는 중…`);
+  try {
+    let { text } = await extractText(file);
+    let note = "";
+    if (text.length > MAX_CHARS) { text = text.slice(0, MAX_CHARS); note = ` 앞부분 ${MAX_CHARS.toLocaleString()}자만 검사합니다.`; }
+    $("#src").value = text;
+    updateCount();
+    setFileStatus(`${file.name}에서 ${text.replace(/\s/g, "").length.toLocaleString()}자를 꺼냈습니다.${note}`);
+    run();
+  } catch (e) {
+    setFileStatus(e instanceof ExtractError ? e.message : `${file.name}을 읽지 못했습니다. (${e.message})`, true);
+  }
+}
+
+function bindFiles() {
+  $("#file").addEventListener("change", (e) => { loadFile(e.target.files[0]); e.target.value = ""; });
+  const drop = $("#drop");
+  let depth = 0;
+  const hasFiles = (e) => [...(e.dataTransfer?.types || [])].includes("Files");
+  addEventListener("dragenter", (e) => { if (!hasFiles(e)) return; depth++; drop.classList.add("dragging"); });
+  addEventListener("dragleave", () => { depth = Math.max(0, depth - 1); if (!depth) drop.classList.remove("dragging"); });
+  addEventListener("dragover", (e) => { if (hasFiles(e)) e.preventDefault(); });
+  addEventListener("drop", (e) => {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    depth = 0;
+    drop.classList.remove("dragging");
+    loadFile(e.dataTransfer.files[0]);
+  });
+}
+
 // ── 이벤트 ─────────────────────────────────────────────────
 function bind() {
-  $("#genre").addEventListener("click", (e) => {
-    const b = e.target.closest("button");
-    if (!b) return;
-    state.genre = b.dataset.g;
-    renderGenre();
-    updateCount();
-    if (state.result) run({ scroll: false });
-  });
   $("#samples").addEventListener("click", (e) => {
     const b = e.target.closest("button");
     if (!b) return;
     const s = SAMPLES.find((x) => x.id === b.dataset.s);
     $("#src").value = s.text;
-    state.genre = s.genre;
-    renderGenre();
+    setFileStatus("");
     updateCount();
   });
   $("#src").addEventListener("input", updateCount);
@@ -413,10 +472,12 @@ function bind() {
 function init() {
   try {
     const saved = JSON.parse(localStorage.getItem(STORE) || "null");
-    if (saved?.text) { $("#src").value = saved.text; state.genre = GENRES[saved.genre] ? saved.genre : "fiction"; }
+    if (saved?.text) $("#src").value = saved.text;
   } catch { /* 무시 */ }
-  renderGenre();
   renderSamples();
+  $("#file").accept = ACCEPT;
+  $("#formats").textContent = `올릴 수 있는 파일: ${FORMAT_LABEL}`;
+  bindFiles();
   updateCount();
   bind();
   observe();
