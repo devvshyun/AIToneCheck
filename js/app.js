@@ -39,7 +39,7 @@ function updateCount() {
 // ── 실행 ───────────────────────────────────────────────────
 function run({ scroll = true } = {}) {
   const text = $("#src").value;
-  if (!text.trim()) { toast("원고를 먼저 넣어 주세요"); $("#src").focus(); return; }
+  if (!text.trim()) { toast("검사할 글을 먼저 넣어 주세요"); $("#src").focus(); return; }
   const r = analyze(text, state.genre);
   state.result = r;
   state.spans = flattenSpans(r.findings);
@@ -81,12 +81,12 @@ function renderVerdict(r) {
   const el = $("#verdict");
   el.className = `verdict ${v.level}`;
   el.innerHTML = `
-    <div data-reveal><span class="v-num">${v.per1k}</span><span class="v-unit">1,000자당 신호 밀도</span></div>
+    <div data-reveal><span class="v-num">${v.per1k}</span><span class="v-unit">1,000자당 의심 표현 밀도</span></div>
     <p class="v-label" data-reveal style="--d:.1s"><span>${words[v.level]}</span></p>
     <div data-reveal style="--d:.18s">
       <div class="scale"><i style="left:0"></i></div>
-      <div class="scale-labels"><span>사람 쪽</span><span>일부</span><span>뚜렷</span></div>
-      <p class="v-facts">신호 ${v.signals}종이 ${v.groups}개 계열에 걸쳐 잡혔습니다. ${esc(GENRES[r.genre])} 기준입니다.</p>
+      <div class="scale-labels"><span>적음</span><span>보통</span><span>많음</span></div>
+      <p class="v-facts">의심 표현 ${v.signals}종류를 ${v.groups}개 분류에서 찾았습니다. ${esc(GENRES[r.genre])} 기준입니다.</p>
     </div>`;
   requestAnimationFrame(() => setTimeout(() => { $(".scale i", el).style.left = `${(pos * 100).toFixed(1)}%`; }, 300));
 }
@@ -96,7 +96,7 @@ function renderTop(r) {
     ? r.top.map((t, i) => `<li data-reveal style="--d:${i * 0.07}s">
         <b><span class="id">${esc(t.id)}</span>${esc(t.name)}</b><span class="n">×${t.count}</span>
         <span class="fx">${esc(t.fix)}</span></li>`).join("")
-    : `<li class="empty" data-reveal>반복되거나 몰린 버릇이 잡히지 않았습니다. 07의 목록은 직접 읽어 보세요.</li>`;
+    : `<li class="empty" data-reveal>반복되는 의심 표현이 없습니다. 07번 항목은 직접 읽으며 확인해 보세요.</li>`;
 }
 
 // ── 03 리듬 ────────────────────────────────────────────────
@@ -122,7 +122,7 @@ function renderMetrics(r) {
       <span>${esc(c.key)}</span><span class="cbar"><i data-w="${(c.count / max) * 100}"></i></span><span class="n">${c.count}</span></div>`).join("");
 }
 
-// ── 04 교정지 ──────────────────────────────────────────────
+// ── 04 표시된 문장 ──────────────────────────────────────────────
 function noteNo(id) { return state.result.findings.findIndex((f) => f.id === id) + 1; }
 
 function renderDoc() {
@@ -150,7 +150,7 @@ function renderNotes() {
         <span class="ct">×${f.count}</span>
       </button>
       <div class="note-body"><div>${noteBody(f)}</div></div>
-    </li>`).join("") : `<li class="empty">빨간 펜을 댈 곳이 없습니다.</li>`;
+    </li>`).join("") : `<li class="empty">표시할 곳이 없습니다.</li>`;
 }
 
 function noteBody(f) {
@@ -207,7 +207,7 @@ function renderFixes() {
       ${baHtml(s)}
       ${toggleHtml(s)}
     </li>`).join("")
-    : `<li class="empty" data-reveal>기계적으로 바꿀 후보가 없습니다. 여백 메모의 처방을 보고 오른쪽 칸에서 직접 고치세요.</li>`;
+    : `<li class="empty" data-reveal>자동으로 고칠 수 있는 곳이 없습니다. 04번 항목의 처방을 보고 수정본 칸에서 직접 고치세요.</li>`;
 }
 
 function setApplied(key, on) {
@@ -241,7 +241,7 @@ function renderRevised() {
 // ── 06 다시 검수 ───────────────────────────────────────────
 function recheck() {
   const revised = $("#revised").value;
-  if (!revised.trim()) { toast("교정본이 비어 있습니다"); return; }
+  if (!revised.trim()) { toast("수정본이 비어 있습니다"); return; }
   const after = analyze(revised, state.genre);
   const c = compare(state.result, after);
   const alerts = [
@@ -255,13 +255,13 @@ function recheck() {
   }).join("");
   $("#second-body").innerHTML = `
     <div class="vs" data-reveal>
-      <div class="side"><small>교정 전</small><b>${c.before.per1k}</b><span>${esc(c.before.label)}</span></div>
+      <div class="side"><small>원문</small><b>${c.before.per1k}</b><span>${esc(c.before.label)}</span></div>
       <span class="arrow">→</span>
-      <div class="side"><small>교정 후</small><b>${c.after.per1k}</b><span>${esc(c.after.label)}</span></div>
+      <div class="side"><small>수정본</small><b>${c.after.per1k}</b><span>${esc(c.after.label)}</span></div>
     </div>
     <div class="alerts" data-reveal>${alerts.join("")}</div>
     ${rows ? `<table class="delta" data-reveal><tbody>${rows}</tbody></table>` : ""}
-    <div class="actions" data-reveal><button class="btn" id="adopt" type="button"><span>교정본으로 다시 시작</span><i aria-hidden="true">↺</i></button></div>`;
+    <div class="actions" data-reveal><button class="btn" id="adopt" type="button"><span>수정본으로 다시 검사</span><i aria-hidden="true">↺</i></button></div>`;
   $("#second").hidden = false;
   $("#adopt").onclick = () => {
     $("#src").value = revised;
@@ -296,14 +296,15 @@ function fillBars() { $$(".cbar i").forEach((b) => { b.style.width = `${b.datase
 
 function parallax() {
   if (reduced) return;
-  const word = $(".hero-word");
+  const word = $(".hero-title");
+  if (!word) return;
   let ticking = false;
   addEventListener("scroll", () => {
     if (ticking) return;
     ticking = true;
     requestAnimationFrame(() => {
       const y = scrollY;
-      if (y < innerHeight * 1.2) word.style.transform = `translate3d(${y * -0.12}px, ${y * 0.22}px, 0)`;
+      if (y < innerHeight * 1.2) word.style.transform = `translate3d(0, ${y * 0.18}px, 0)`;
       ticking = false;
     });
   }, { passive: true });
@@ -405,7 +406,7 @@ function bind() {
   $("#all-apply").addEventListener("click", () => bulk(true));
   $("#all-keep").addEventListener("click", () => bulk(false));
   $("#recheck").addEventListener("click", recheck);
-  $("#copy-revised").addEventListener("click", () => copy($("#revised").value, "교정본을 복사했습니다"));
+  $("#copy-revised").addEventListener("click", () => copy($("#revised").value, "수정본을 복사했습니다"));
   $("#copy-prompt").addEventListener("click", () => copy($("#prompt").textContent, "프롬프트를 복사했습니다"));
 }
 
