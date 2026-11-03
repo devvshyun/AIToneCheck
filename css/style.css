@@ -129,7 +129,24 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 }
 .diffview del { color: var(--pen); background: var(--pen-wash); text-decoration-color: var(--pen); }
 .diffview ins { text-decoration: underline; text-decoration-color: var(--ok); text-decoration-thickness: 2px; text-underline-offset: 5px; background: rgba(31, 138, 76, .1); }
-.diff-head { display: block; margin: 0 0 20px; font: 400 12px/1.4 var(--sans); color: var(--ink-3); }
+.diffview.split { max-width: 1320px; }
+.diff-bar {
+  position: sticky; top: 0; z-index: 2; display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px;
+  margin: -40px 0 24px; padding: 14px 0; background: var(--paper); border-bottom: 1px solid var(--rule);
+  font: 400 13px/1.4 var(--sans);
+}
+.diff-title { margin-right: auto; font-weight: 600; }
+.diff-title small { font-weight: 400; color: var(--ink-3); margin-left: 6px; }
+.seg { display: inline-flex; border: 1px solid var(--rule); border-radius: 6px; overflow: hidden; }
+.seg button { height: 28px; padding: 0 10px; font-size: 12px; color: var(--ink-2); }
+.seg button + button { border-left: 1px solid var(--rule); }
+.seg button[aria-pressed="true"] { background: var(--ink); color: var(--paper); }
+.diff-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 40px; }
+.diff-cols.row { padding: 0 0 1.95em; }
+.diff-cols.row > div:empty::after { content: "(없음)"; font: 12px var(--sans); color: var(--ink-3); }
+.diff-cap { margin: 0 0 8px; font: 600 12px/1.4 var(--sans); color: var(--ink-3); }
+.diff-text { white-space: pre-wrap; }
+.diffview .gap { display: inline-block; width: 6px; height: 1em; vertical-align: -2px; border-left: 2px solid var(--pen); opacity: .6; }
 
 .empty {
   position: absolute; left: 50%; top: 128px; transform: translateX(-50%);
@@ -244,6 +261,14 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 .sbtn.line:hover { border-color: var(--ink); opacity: 1; }
 .item-actions { display: flex; gap: 6px; margin-top: 10px; }
 .empty-tab { color: var(--ink-3); font-size: 13px; }
+.fixbar {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px;
+  margin: 18px 0 4px; padding: 10px 12px; border-radius: 8px; background: var(--sheet); font-size: 13px;
+}
+.fixbar b { font-weight: 700; }
+.fixbar-actions { display: flex; gap: 6px; }
+.fixbar.sticky { position: sticky; top: -20px; z-index: 2; margin: -20px -20px 14px; border-radius: 0; padding: 12px 20px; border-bottom: 1px solid var(--rule); }
+.tbtn:disabled { opacity: .35; cursor: default; background: none; }
 
 /* 변화 */
 .vs { display: grid; grid-template-columns: 1fr auto 1fr; align-items: end; gap: 10px; padding-bottom: 14px; border-bottom: 1px solid var(--rule); }
@@ -290,6 +315,7 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 /* ── 좁은 화면: 패널을 아래 시트로 ─────────── */
 @media (max-width: 900px) {
   :root { --handle: 60px; }
+  .diff-cols { grid-template-columns: 1fr; }
   .top { gap: 4px; padding: 0 8px; }
   .status, .count, .tbtn.ghost { display: none; }
   .tbtn { padding: 0 9px; }

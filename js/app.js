@@ -28,6 +28,7 @@ const state = {
   active: -1,       // 고른 밑줄(spans 인덱스)
   tab: "summary",
   diff: false,
+  diffMode: null,   // "split"(나란히) | "inline"(한 줄)
 };
 
 // ── 공통 ───────────────────────────────────────────────────
@@ -187,17 +188,44 @@ function applyEdits(edits) {
   let lastStart = Infinity;
   ta.focus({ preventScroll: true });
   const keep = scroller.scrollTop;
+  let done = 0;
   for (const e of list) {
     if (e.end > lastStart) continue; // 겹치는 제안은 건너뛴다
     ta.setSelectionRange(e.start, e.end);
     const ok = e.after ? document.execCommand("insertText", false, e.after) : document.execCommand("delete");
     if (!ok) ta.setRangeText(e.after, e.start, e.end, "end");
     lastStart = e.start;
+    done++;
   }
   scroller.scrollTop = keep;
   clearTimeout(timer);
   run();
-  toast(list.length > 1 ? `${list.length}곳을 고쳤습니다. Ctrl+Z로 되돌릴 수 있습니다` : "고쳤습니다. Ctrl+Z로 되돌릴 수 있습니다");
+  toast(done > 1 ? `${done}곳을 고쳤습니다. Ctrl+Z로 되돌릴 수 있습니다` : "고쳤습니다. Ctrl+Z로 되돌릴 수 있습니다");
+  return done;
+}
+
+// 글 전체에서 바로 고칠 수 있는 제안 (같은 자리는 한 번만)
+function allSuggestions() {
+  if (!state.result) return [];
+  const seen = new Map();
+  for (const f of state.result.findings) for (const s of f.spans) {
+    if (!s.suggestion) continue;
+    const k = `${s.suggestion.start}:${s.suggestion.end}`;
+    if (!seen.has(k)) seen.set(k, s.suggestion);
+  }
+  return [...seen.values()];
+}
+
+function fixBar({ sticky = false } = {}) {
+  const n = allSuggestions().length;
+  const changed = state.result && state.baseline && state.baseline.text !== state.result.text;
+  if (!n && !changed) return "";
+  return `<div class="fixbar${sticky ? " sticky" : ""}">
+    <span>${n ? `바로 고칠 수 있는 곳 <b>${n}</b>곳` : "바로 고칠 수 있는 곳이 없습니다"}</span>
+    <span class="fixbar-actions">
+      ${changed ? `<button class="sbtn line" type="button" data-act="diff">${state.diff ? "편집으로" : "처음 글과 비교"}</button>` : ""}
+      ${n ? `<button class="sbtn" type="button" data-act="apply-all">모두 적용</button>` : ""}
+    </span></div>`;
 }
 
 // ── 패널 ───────────────────────────────────────────────────
@@ -214,7 +242,10 @@ function renderPanel() {
   $("#items-count").textContent = r && r.findings.length ? r.findings.length : "";
   const changed = r && state.baseline && state.baseline.text !== r.text;
   $("#changes-dot").hidden = !changed;
-  $("#compare-btn").hidden = !changed && !state.diff;
+  const cb = $("#compare-btn");
+  cb.hidden = !r;
+  cb.disabled = !changed && !state.diff;
+  cb.title = cb.disabled ? "글을 고치면 처음 글과 비교할 수 있습니다" : "";
   renderSummary();
   renderItems();
   renderChanges();
@@ -267,6 +298,7 @@ function renderSummary() {
     <div class="scale-labels"><span>적음</span><span>보통</span><span>많음</span></div>
     <p class="genre">글 종류 <b>${esc(genreLabel(r.detected))}</b> · ${esc(r.detected.reasons.join(", "))}</p>
 
+    ${fixBar()}
     <p class="h">많이 나온 항목</p>
     ${r.top.length ? `<ol class="top3">${r.top.map((t) => `<li><button type="button" data-f="${esc(t.id)}">
       <b><span class="sevdot s${t.sev}"></span>${esc(t.name)}</b><span class="n">×${t.count}</span>
@@ -316,7 +348,7 @@ function renderItems() {
         </div></div>`;
     }).join("");
   }).join("");
-  box.innerHTML = html;
+  box.innerHTML = fixBar({ sticky: true }) + html;
 }
 
 function renderChanges() {
@@ -379,8 +411,44 @@ function renderMore() {
 function renderDiff() {
   const base = state.baseline?.text || "";
   const ops = diffWords(base, ta.value);
-  $("#diffview").innerHTML = `<span class="diff-head">처음 글과 지금 글 비교 · 읽기 전용 · <del>지운 부분</del> <ins>넣은 부분</ins></span>` + ops.map((o) =>
-    o.type === "eq" ? esc(o.text) : o.type === "del" ? `<del>${esc(o.text)}</del>` : `<ins>${esc(o.text)}</ins>`).join("");
+  const mode = state.diffMode || (narrow() ? "inline" : "split");
+  const del = ops.filter((o) => o.type === "del").length;
+  const ins = ops.filter((o) => o.type === "ins").length;
+  const bar = `<div class="diff-bar">
+    <span class="diff-title">처음 글과 지금 글 <small>지운 곳 ${del} · 넣은 곳 ${ins} · 읽기 전용</small></span>
+    <span class="seg" role="group" aria-label="보기 방식">
+      <button type="button" data-mode="split" aria-pressed="${mode === "split"}">나란히</button>
+      <button type="button" data-mode="inline" aria-pressed="${mode === "inline"}">한 줄로</button>
+    </span>
+    <button class="sbtn" type="button" data-act="diff">편집으로 돌아가기</button>
+  </div>`;
+  const view = $("#diffview");
+  view.classList.toggle("split", mode === "split");
+  if (mode === "split") {
+    // 문단마다 한 행으로 묶어 좌우 높이를 맞춘다. 문단 경계는 양쪽에 공통인 빈 줄(eq)에서 자른다.
+    const rows = [];
+    let cur = { l: "", r: "" };
+    for (const o of ops) {
+      if (o.type === "eq") {
+        const parts = o.text.split(/\n\s*\n/);
+        parts.forEach((part, k) => {
+          if (k > 0) { rows.push(cur); cur = { l: "", r: "" }; }
+          cur.l += esc(part);
+          cur.r += esc(part);
+        });
+      } else if (o.type === "del") {
+        cur.l += `<del>${esc(o.text)}</del>`;
+        if (/\S/.test(o.text)) cur.r += `<span class="gap" title="지운 자리"></span>`;
+      } else {
+        cur.r += `<ins>${esc(o.text)}</ins>`;
+      }
+    }
+    rows.push(cur);
+    view.innerHTML = bar + `<div class="diff-cols head"><p class="diff-cap">처음 글</p><p class="diff-cap">지금 글</p></div>` +
+      rows.map((x) => `<div class="diff-cols row"><div class="diff-text">${x.l.replace(/^\n+|\n+$/g, "")}</div><div class="diff-text">${x.r.replace(/^\n+|\n+$/g, "")}</div></div>`).join("");
+  } else {
+    view.innerHTML = bar + `<div class="diff-text">${ops.map((o) => o.type === "eq" ? esc(o.text) : o.type === "del" ? `<del>${esc(o.text)}</del>` : `<ins>${esc(o.text)}</ins>`).join("")}</div>`;
+  }
 }
 function toggleDiff(on = !state.diff) {
   state.diff = on;
@@ -515,6 +583,11 @@ function bind() {
       return;
     }
     const act = t.closest("[data-act]")?.dataset.act;
+    if (act === "apply-all") {
+      const done = applyEdits(allSuggestions());
+      if (done) { toggleDiff(true); if (narrow()) openSheet(false); }
+      return;
+    }
     if (act === "diff") toggleDiff();
     if (act === "rebase") { state.baseline = state.result; renderPanel(); toast("지금 글을 새 기준으로 삼았습니다"); }
     if (act === "revert") {
@@ -529,6 +602,11 @@ function bind() {
   });
 
   $("#compare-btn").addEventListener("click", () => toggleDiff());
+  $("#diffview").addEventListener("click", (e) => {
+    const m = e.target.closest("[data-mode]");
+    if (m) { state.diffMode = m.dataset.mode; renderDiff(); return; }
+    if (e.target.closest('[data-act="diff"]')) toggleDiff(false);
+  });
   $("#copy").addEventListener("click", () => { if (ta.value) copy(ta.value, "글을 복사했습니다"); });
   $("#clear").addEventListener("click", () => {
     if (!ta.value) return;
