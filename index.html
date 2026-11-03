@@ -2,12 +2,12 @@
 <html lang="ko">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>AI 톤 체크</title>
   <meta name="description" content="한국어 글에서 AI가 쓴 것처럼 읽히는 부분을 찾아 표시하고 고칠 방향을 알려 주는 브라우저 전용 도구">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Serif+KR:wght@300;400;600&display=swap">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Serif+KR:wght@400;600&display=swap">
   <link rel="stylesheet" href="fonts/pretendard/pretendardvariable-dynamic-subset.css">
   <link rel="stylesheet" href="css/style.css">
   <script>
@@ -33,191 +33,69 @@
   </script>
 </head>
 <body>
-  <div class="cursor" aria-hidden="true"></div>
-
-  <header class="bar">
-    <a class="mark" href="#top">AI 톤 체크</a>
-    <nav>
-      <a class="u" href="#manuscript">검사</a>
-      <a class="u" href="#principles">기준</a>
-      <a class="u" href="https://github.com/devvshyun/AIToneCheck">GitHub</a>
-    </nav>
-  </header>
-
   <div class="boot-error" id="boot-error" role="alert" hidden>
-    <p><b>이 브라우저에서는 검사 기능이 실행되지 않았습니다.</b> 최신 Chrome, Edge, Firefox, Safari(iOS·macOS 16.4 이상)에서 다시 열어 주세요.<span id="boot-detail"></span></p>
+    <b>이 브라우저에서는 검사 기능이 실행되지 않았습니다.</b> 최신 Chrome, Edge, Firefox, Safari(iOS·macOS 16.4 이상)에서 다시 열어 주세요.
+    <span id="boot-detail"></span>
   </div>
 
-  <main id="top">
-    <!-- Hero -->
-    <section class="hero">
-      <h1 class="hero-title">
-        <span class="line"><span>AI 톤 체크</span></span>
-      </h1>
-      <div class="hero-foot">
-        <p class="lede" data-reveal>한국어 글에서 AI가 쓴 것처럼 읽히는 부분을 찾아 표시하고, 고칠 방향을 알려 줍니다. 무엇을 고칠지는 직접 고릅니다.</p>
-        <a class="cta" href="#manuscript" data-reveal style="--d:.1s"><span>글 넣기</span><i aria-hidden="true">↓</i></a>
-      </div>
-    </section>
-
-    <!-- 01 원고 -->
-    <section class="sec" id="manuscript">
-      <div class="sec-head" data-reveal>
-        <span class="num">01</span>
-        <h2>글 입력</h2>
-        <p>어떤 글이든 붙여 넣거나 파일로 올리세요. 소설인지 에세이인지 설명문인지는 글을 보고 판단합니다. 파일과 글은 이 브라우저 안에서만 처리되고 서버로 전송되지 않습니다.</p>
-      </div>
-      <div class="sec-body" data-reveal style="--d:.08s">
-        <div class="controls">
-          <label class="file-btn">
-            <input type="file" id="file">
-            <span class="u">파일 올리기</span>
-          </label>
-          <div class="samples" id="samples"><span>예문</span></div>
-        </div>
-        <div class="paper" id="drop">
-          <textarea id="src" spellcheck="false" placeholder="검사할 글을 붙여 넣거나 파일을 여기로 끌어다 놓으세요."></textarea>
-          <div class="drop-hint" aria-hidden="true"><span>여기에 놓으면 글을 꺼내 옵니다</span></div>
-        </div>
-        <p class="formats" id="formats"></p>
-        <p class="file-status" id="file-status" role="status" aria-live="polite"></p>
-        <div class="actions">
-          <span class="count" id="count">0</span>
-          <span class="detect" id="detect-live"></span>
-          <button class="link u" id="clear" type="button">비우기</button>
-          <button class="btn" id="run" type="button"><span>검사하기</span><i aria-hidden="true">→</i></button>
-        </div>
-      </div>
-    </section>
-
-    <div id="results" hidden>
-      <!-- 02 판정 -->
-      <section class="sec" id="verdict-sec">
-        <div class="sec-head" data-reveal>
-          <span class="num">02</span>
-          <h2>결과</h2>
-          <p>AI가 썼는지 판별하는 값은 아닙니다. 의심 표현이 글에 얼마나 몰려 있는지 보여 줍니다.</p>
-        </div>
-        <div class="sec-body">
-          <div class="verdict" id="verdict"></div>
-          <ol class="habits" id="top3"></ol>
-        </div>
-      </section>
-
-      <!-- 03 수치 -->
-      <section class="sec">
-        <div class="sec-head" data-reveal>
-          <span class="num">03</span>
-          <h2>문장 리듬</h2>
-          <p>대사를 뺀 서술 문장만 셉니다. 합격선은 없고 참고용으로 보는 숫자입니다.</p>
-        </div>
-        <div class="sec-body">
-          <div class="stats" id="metrics"></div>
-          <div class="conn" id="connectives"></div>
-        </div>
-      </section>
-
-      <!-- 04 표시된 문장 -->
-      <section class="band">
-        <div class="band-head" data-reveal>
-          <div><span class="num">04</span><h2>표시된 문장</h2></div>
-          <div class="legend">
-            <span><b class="m1">실선</b> 강함</span>
-            <span><b class="m2">물결</b> 중간</span>
-            <span><b class="m3">점선</b> 약함</span>
-          </div>
-        </div>
-        <div class="sheet" data-reveal style="--d:.08s">
-          <div class="sheet-text" id="doc" tabindex="0"></div>
-          <aside class="margin">
-            <p class="margin-cap">항목 <span id="note-count"></span></p>
-            <ol class="notes" id="notes"></ol>
-          </aside>
-        </div>
-      </section>
-
-      <!-- 05 고친 안 -->
-      <section class="sec">
-        <div class="sec-head" data-reveal>
-          <span class="num">05</span>
-          <h2>고친 안</h2>
-          <p>단어를 지우거나 바꾸는 정도로 고칠 수 있는 곳만 제안합니다. 기본값은 원문 유지이고, 적용할 것만 고르면 됩니다.</p>
-        </div>
-        <div class="sec-body">
-          <div class="bulk" data-reveal>
-            <button class="link u" id="all-apply" type="button">모두 적용</button>
-            <button class="link u" id="all-keep" type="button">모두 되돌리기</button>
-          </div>
-          <ol class="fixes" id="suggestions"></ol>
-          <div class="compare" data-reveal>
-            <div>
-              <p class="cap">원문</p>
-              <div class="diff" id="diff-before"></div>
-            </div>
-            <div>
-              <p class="cap">수정본 <span>직접 고쳐도 됩니다</span></p>
-              <textarea id="revised" spellcheck="false"></textarea>
-            </div>
-          </div>
-          <div class="actions">
-            <button class="link u" id="copy-revised" type="button">수정본 복사</button>
-            <button class="btn" id="recheck" type="button"><span>수정본 다시 검사</span><i aria-hidden="true">→</i></button>
-          </div>
-        </div>
-      </section>
-
-      <!-- 06 2차 검수 -->
-      <section class="sec" id="second" hidden>
-        <div class="sec-head" data-reveal>
-          <span class="num">06</span>
-          <h2>다시 검사</h2>
-          <p>표현 하나를 지우면 다른 상투 표현이 그 자리에 들어가기 쉽습니다. 수정본을 같은 기준으로 다시 검사한 결과입니다.</p>
-        </div>
-        <div class="sec-body" id="second-body"></div>
-      </section>
-
-      <!-- 07 직접 읽을 것 -->
-      <section class="sec">
-        <div class="sec-head" data-reveal>
-          <span class="num">07</span>
-          <h2>직접 확인할 것</h2>
-          <p>자동으로는 찾기 어려운 항목입니다. 글을 읽으면서 확인하세요.</p>
-        </div>
-        <div class="sec-body">
-          <ul class="checks" id="readonly"></ul>
-          <div class="prompt" data-reveal>
-            <p class="cap">LLM에게 맡기기</p>
-            <p>이 페이지는 LLM을 호출하지 않습니다. 더 자세한 피드백이 필요하면 아래 프롬프트를 복사해 Claude 같은 챗봇에 붙여 넣으세요. 입력한 글, 검사 결과, 검사 기준이 함께 들어 있습니다.</p>
-            <button class="btn ghost" id="copy-prompt" type="button"><span>프롬프트 복사</span><i aria-hidden="true">↗</i></button>
-            <details><summary class="u">미리 보기</summary><pre id="prompt"></pre></details>
-          </div>
-        </div>
-      </section>
+  <header class="top">
+    <a class="logo" href="./">AI 톤 체크</a>
+    <div class="tools">
+      <label class="tbtn file-btn" title="TXT, MD, HTML, RTF, DOCX, ODT, HWP, HWPX, PDF, EPUB, PPTX">
+        <input type="file" id="file">
+        <span>파일 열기</span>
+      </label>
+      <details class="menu" id="sample-menu">
+        <summary class="tbtn">예문</summary>
+        <div class="menu-list" id="samples"></div>
+      </details>
     </div>
+    <p class="status" id="status" role="status" aria-live="polite"></p>
+    <div class="tools end">
+      <span class="count" id="count"></span>
+      <button class="tbtn" id="compare-btn" type="button" hidden>처음 글과 비교</button>
+      <button class="tbtn" id="copy" type="button">복사</button>
+      <button class="tbtn" id="clear" type="button">비우기</button>
+      <a class="tbtn ghost" href="https://github.com/devvshyun/AIToneCheck" title="소스 코드">GitHub</a>
+    </div>
+  </header>
 
-    <!-- 기준 -->
-    <section class="sec principles" id="principles">
-      <div class="sec-head" data-reveal>
-        <span class="num">§</span>
-        <h2>기준</h2>
+  <main class="app">
+    <section class="editor" aria-label="검사할 글">
+      <div class="scroller" id="scroller">
+        <div class="doc" id="doc">
+          <div class="backdrop" id="backdrop" aria-hidden="true"></div>
+          <textarea id="src" spellcheck="false" aria-label="검사할 글" placeholder="검사할 글을 붙여 넣거나 파일을 끌어다 놓으세요."></textarea>
+        </div>
+        <div class="diffview" id="diffview" hidden></div>
       </div>
-      <ol class="rules sec-body">
-        <li data-reveal><span>1</span><p><b>숫자는 참고용입니다.</b> 어디부터 읽을지 고르는 데 쓰고, 고칠지는 글을 읽고 판단합니다. 숫자를 낮추려고 고치면 글이 오히려 어색해집니다.</p></li>
-        <li data-reveal style="--d:.06s"><span>2</span><p><b>한 번 나온 표현은 대체로 괜찮습니다.</b> 같은 표현이 반복되거나 한곳에 몰렸을 때 무겁게 봅니다.</p></li>
-        <li data-reveal style="--d:.12s"><span>3</span><p><b>고친 뒤에 다시 검사합니다.</b> 설명 문장을 지우면 '한참'이 늘고, 짧은 문장을 이으면 같은 연결어미가 늘어나는 식으로 다른 문제가 생기기 쉽습니다.</p></li>
-        <li data-reveal style="--d:.18s"><span>4</span><p><b>문장 길이가 고르면 의심합니다.</b> 짧은 문장만 이어지거나 긴 문장만 이어지는 글이 기계적으로 읽힙니다.</p></li>
-      </ol>
+      <div class="empty" id="empty">
+        <p>글을 넣으면 바로 검사합니다. 소설인지 에세이인지 설명문인지는 글을 보고 판단합니다.</p>
+        <p class="muted">파일: TXT · MD · HTML · RTF · DOCX · ODT · HWP · HWPX · PDF · EPUB · PPTX</p>
+        <div class="empty-samples" id="empty-samples"></div>
+      </div>
+      <div class="drop" id="drop" aria-hidden="true"><span>여기에 놓으면 글을 꺼내 옵니다</span></div>
     </section>
+
+    <aside class="panel" id="panel" aria-label="검사 결과">
+      <button class="handle" id="handle" type="button" aria-expanded="false">
+        <span class="handle-bar" aria-hidden="true"></span>
+        <span class="handle-text" id="handle-text">글을 넣으면 결과가 여기에 나옵니다</span>
+      </button>
+      <nav class="tabs" role="tablist">
+        <button role="tab" type="button" data-tab="summary" aria-selected="true">요약</button>
+        <button role="tab" type="button" data-tab="items" aria-selected="false">항목 <span id="items-count"></span></button>
+        <button role="tab" type="button" data-tab="changes" aria-selected="false">변화 <span id="changes-dot"></span></button>
+        <button role="tab" type="button" data-tab="more" aria-selected="false">더 보기</button>
+      </nav>
+      <div class="panel-body" id="panel-body">
+        <div class="tab" id="tab-summary" role="tabpanel"></div>
+        <div class="tab" id="tab-items" role="tabpanel" hidden></div>
+        <div class="tab" id="tab-changes" role="tabpanel" hidden></div>
+        <div class="tab" id="tab-more" role="tabpanel" hidden></div>
+      </div>
+    </aside>
   </main>
-
-  <footer class="foot">
-    <div class="foot-meta">
-      <p>검사 기준 <a class="u" href="docs/ai-tone-essence.md">ai-tone-essence.md</a></p>
-      <p>번역투·설명문 규칙 <a class="u" href="https://github.com/epoko77-ai/im-not-ai">im-not-ai</a>, <a class="u" href="https://github.com/leeandev/stop-slop-ko">stop-slop-ko</a> (MIT)</p>
-      <p>쉼표 통계 KatFish (ACL 2025)</p>
-      <p>서체 Pretendard, Noto Serif KR (OFL)</p>
-    </div>
-  </footer>
 
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
   <script type="module" src="js/app.js"></script>
