@@ -3,63 +3,49 @@ import { GENRES, READ_ONLY } from "./rules.js";
 import { SAMPLES } from "./samples.js";
 import { buildPrompt } from "./prompt.js";
 
-const $ = (s) => document.querySelector(s);
-const esc = (s) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const $ = (s, r = document) => r.querySelector(s);
+const $$ = (s, r = document) => [...r.querySelectorAll(s)];
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 const STORE = "aitonecheck:v1";
+const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 const state = {
   genre: "fiction",
   result: null,
-  spans: [],          // flatten 결과
-  suggestions: [],    // {key, finding, ...suggestion}
-  applied: new Set(), // 적용할 suggestion key
-  selected: null,     // finding id
+  spans: [],
+  suggestions: [],
+  applied: new Set(),
+  open: null, // 펼친 메모의 finding id
+  here: null, // 지금 고른 span
 };
 
-// ── 입력부 ───────────────────────────────────────────────────
+// ── 입력 ────────────────────────────────────────────────────
 function renderGenre() {
-  const box = $("#genre");
-  box.innerHTML = Object.entries(GENRES).map(([k, v]) =>
+  $("#genre").innerHTML = Object.entries(GENRES).map(([k, v]) =>
     `<button type="button" role="radio" data-g="${k}" aria-checked="${k === state.genre}">${v}</button>`).join("");
-  box.onclick = (e) => {
-    const b = e.target.closest("button");
-    if (!b) return;
-    state.genre = b.dataset.g;
-    renderGenre();
-    if (state.result) run();
-  };
 }
 
 function renderSamples() {
-  const box = $("#samples");
-  box.insertAdjacentHTML("beforeend", SAMPLES.map((s) =>
-    `<button type="button" class="ghost" data-s="${s.id}">${esc(s.label)}</button>`).join(""));
-  box.onclick = (e) => {
-    const b = e.target.closest("button");
-    if (!b) return;
-    const s = SAMPLES.find((x) => x.id === b.dataset.s);
-    $("#src").value = s.text;
-    state.genre = s.genre;
-    renderGenre();
-    updateCount();
-    run();
-  };
+  $("#samples").insertAdjacentHTML("beforeend", SAMPLES.map((s) =>
+    `<button type="button" class="u" data-s="${s.id}">${esc(s.label)}</button>`).join(""));
 }
 
 function updateCount() {
   const t = $("#src").value;
-  $("#count").textContent = `${t.replace(/\s/g, "").length.toLocaleString()}자 (공백 제외)`;
-  try { localStorage.setItem(STORE, JSON.stringify({ text: t, genre: state.genre })); } catch { /* 저장 불가 환경 */ }
+  $("#count").innerHTML = `${t.replace(/\s/g, "").length.toLocaleString()}<small>자</small>`;
+  try { localStorage.setItem(STORE, JSON.stringify({ text: t, genre: state.genre })); } catch { /* 저장 불가 */ }
 }
 
 // ── 실행 ───────────────────────────────────────────────────
-function run() {
+function run({ scroll = true } = {}) {
   const text = $("#src").value;
-  if (!text.trim()) { toast("검사할 글을 넣어 주세요"); return; }
+  if (!text.trim()) { toast("원고를 먼저 넣어 주세요"); $("#src").focus(); return; }
   const r = analyze(text, state.genre);
   state.result = r;
   state.spans = flattenSpans(r.findings);
-  state.selected = null;
+  state.open = null;
+  state.here = null;
+  state.applied = new Set();
   state.suggestions = [];
   const seen = new Set();
   for (const f of r.findings) for (const s of f.spans) {
@@ -70,7 +56,6 @@ function run() {
     state.suggestions.push({ key, finding: f, ...s.suggestion });
   }
   state.suggestions.sort((a, b) => a.start - b.start);
-  state.applied = new Set();
 
   $("#results").hidden = false;
   $("#second").hidden = true;
@@ -78,181 +63,163 @@ function run() {
   renderTop(r);
   renderMetrics(r);
   renderDoc();
-  renderDetail(null);
-  renderSignals(r);
-  renderSuggestions();
+  renderNotes();
+  renderFixes();
   renderRevised();
-  renderReadOnly();
+  renderChecks();
   $("#prompt").textContent = buildPrompt(r);
-  $("#verdict").scrollIntoView({ behavior: "smooth", block: "start" });
+  observe();
+  if (scroll) $("#verdict-sec").scrollIntoView({ behavior: reduced ? "auto" : "smooth" });
 }
 
-// ── 1. 판정 ─────────────────────────────────────────────────
+// ── 02 판정 ────────────────────────────────────────────────
 function renderVerdict(r) {
   const v = r.verdict;
+  // 밀도를 0~1 눈금으로: 0~6 사람 쪽, 6~14 일부, 14~ 뚜렷
+  const pos = v.per1k < 6 ? (v.per1k / 6) * 0.33 : v.per1k < 14 ? 0.33 + ((v.per1k - 6) / 8) * 0.33 : Math.min(1, 0.66 + ((v.per1k - 14) / 40) * 0.34);
+  const words = { high: "AI 티가 <em>꽤</em> 보입니다", mid: "부분적으로 보입니다", low: "거의 사람 글입니다" };
   const el = $("#verdict");
-  el.className = `card verdict ${v.level}`;
-  const badge = { high: "AI 티<br>많음", mid: "일부", low: "사람<br>쪽" }[v.level];
+  el.className = `verdict ${v.level}`;
   el.innerHTML = `
-    <div class="badge">${badge}</div>
-    <div class="label">${v.label}</div>
-    <div class="facts">신호 ${v.signals}종 · ${v.groups}개 계열 · 1,000자당 신호 밀도 ${v.per1k} · ${GENRES[r.genre]} 기준.
-      판결이 아니라 후보가 얼마나 몰려 있는지 말하는 값입니다.</div>`;
+    <div data-reveal><span class="v-num">${v.per1k}</span><span class="v-unit">1,000자당 신호 밀도</span></div>
+    <p class="v-label" data-reveal style="--d:.1s"><span>${words[v.level]}</span></p>
+    <div data-reveal style="--d:.18s">
+      <div class="scale"><i style="left:0"></i></div>
+      <div class="scale-labels"><span>사람 쪽</span><span>일부</span><span>뚜렷</span></div>
+      <p class="v-facts">신호 ${v.signals}종이 ${v.groups}개 계열에 걸쳐 잡혔습니다. ${esc(GENRES[r.genre])} 기준입니다.</p>
+    </div>`;
+  requestAnimationFrame(() => setTimeout(() => { $(".scale i", el).style.left = `${(pos * 100).toFixed(1)}%`; }, 300));
 }
 
 function renderTop(r) {
   $("#top3").innerHTML = r.top.length
-    ? r.top.map((t) => `<li><span class="pill s${t.sev}">${SEV[t.sev].key}</span><b>${esc(t.id)} ${esc(t.name)}</b> ${t.count}회<br><span class="fix">→ ${esc(t.fix)}</span></li>`).join("")
-    : `<li class="empty">반복·밀집된 버릇이 잡히지 않았습니다. 아래 '읽어서 확인할 항목'은 직접 살펴보세요.</li>`;
+    ? r.top.map((t, i) => `<li data-reveal style="--d:${i * 0.07}s">
+        <b><span class="id">${esc(t.id)}</span>${esc(t.name)}</b><span class="n">×${t.count}</span>
+        <span class="fx">${esc(t.fix)}</span></li>`).join("")
+    : `<li class="empty" data-reveal>반복되거나 몰린 버릇이 잡히지 않았습니다. 07의 목록은 직접 읽어 보세요.</li>`;
 }
 
-// ── 2. 수치 ─────────────────────────────────────────────────
+// ── 03 리듬 ────────────────────────────────────────────────
 function renderMetrics(r) {
   const m = r.metrics;
-  const pct = (x) => `${Math.round(x * 100)}%`;
-  const cards = [
-    { k: "서술 문장 수", v: m.sentences, h: `대사 줄 ${m.dialogueLines}개는 따로 셈` },
-    { k: "평균 문장 길이", v: `${m.meanLen.toFixed(1)}자`, h: "극단이면 의심", warn: m.sentences >= 4 && (m.meanLen < 15 || m.meanLen > 60) },
-    { k: "길이 변동 CV", v: m.cv.toFixed(2), h: "낮을수록 리듬이 고름", warn: m.sentences >= 8 && m.cv < 0.3 },
-    { k: "15자 이하 비율", v: pct(m.shortRatio), h: "높으면 끊어치기(A1)", warn: m.sentences >= 6 && m.shortRatio >= 0.35 },
-    { k: "70자 이상 비율", v: pct(m.longRatio), h: "높으면 장황함(G1)", warn: m.longRatio >= 0.2 },
-    { k: "한 줄 문단", v: m.oneLineParas, h: "많으면 조각·끊어치기", warn: m.oneLineParas >= 3 },
+  const pct = (x) => Math.round(x * 100);
+  const stats = [
+    { k: "서술 문장", v: m.sentences, u: "개", h: `대사 ${m.dialogueLines}줄은 따로` },
+    { k: "평균 길이", v: m.meanLen.toFixed(1), u: "자", h: "너무 짧거나 길면 의심", warn: m.sentences >= 4 && (m.meanLen < 15 || m.meanLen > 60) },
+    { k: "길이 변동", v: m.cv.toFixed(2), u: "CV", h: "낮을수록 리듬이 고름", warn: m.sentences >= 8 && m.cv < 0.3 },
+    { k: "15자 이하", v: pct(m.shortRatio), u: "%", h: "높으면 끊어치기", warn: m.sentences >= 6 && m.shortRatio >= 0.35 },
+    { k: "70자 이상", v: pct(m.longRatio), u: "%", h: "높으면 장황함", warn: m.longRatio >= 0.2 },
+    { k: "한 줄 문단", v: m.oneLineParas, u: "개", h: "많으면 조각난 글", warn: m.oneLineParas >= 3 },
   ];
-  $("#metrics").innerHTML = cards.map((c) =>
-    `<div class="metric${c.warn ? " warn" : ""}"><div class="k">${c.k}</div><div class="v">${c.v}</div><div class="h">${c.warn ? "주의 · " : ""}${c.h}</div></div>`).join("");
+  $("#metrics").innerHTML = stats.map((s, i) => `<div class="stat${s.warn ? " warn" : ""}" data-reveal style="--d:${(i % 3) * 0.06}s">
+    <span class="k">${s.k}</span><span class="v">${s.v}<small>${s.u}</small></span><span class="h">${s.h}</span></div>`).join("");
 
   const max = Math.max(1, ...m.connectives.map((c) => c.count));
   const hot = r.findings.some((f) => f.id === "H1");
   const topKey = [...m.connectives].sort((a, b) => b.count - a.count)[0].key;
-  $("#connectives").innerHTML = `<h3>이음말 분포 <span class="muted small">하나가 다른 것의 2~3배를 넘으면 쏠림(H1)</span></h3>` +
-    m.connectives.map((c) => `<div class="conn${hot && c.key === topKey ? " hot" : ""}"><span>${esc(c.key)}</span><span class="bar"><i style="width:${(c.count / max) * 100}%"></i></span><span class="n">${c.count}</span></div>`).join("");
+  $("#connectives").innerHTML = `<p class="cap" data-reveal>이음말 분포 <span>하나가 다른 것의 2~3배를 넘으면 쏠림</span></p>` +
+    m.connectives.map((c) => `<div class="conn-row${hot && c.key === topKey ? " hot" : ""}" data-reveal>
+      <span>${esc(c.key)}</span><span class="cbar"><i data-w="${(c.count / max) * 100}"></i></span><span class="n">${c.count}</span></div>`).join("");
 }
 
-// ── 3. 하이라이트 ───────────────────────────────────────────
+// ── 04 교정지 ──────────────────────────────────────────────
+function noteNo(id) { return state.result.findings.findIndex((f) => f.id === id) + 1; }
+
 function renderDoc() {
   const { text } = state.result;
   let html = "";
   let pos = 0;
   state.spans.forEach((s, i) => {
     html += esc(text.slice(pos, s.start));
-    const title = [s.f, ...s.also].map((f) => `${f.id} ${f.name}`).join(" / ");
-    html += `<mark class="s${s.f.sev}" data-i="${i}" data-f="${esc(s.f.id)}" tabindex="0" title="${esc(title)}">${esc(text.slice(s.start, s.end))}</mark>`;
+    const ids = [s.f, ...s.also].map((f) => f.id).join(" ");
+    html += `<mark class="s${s.f.sev}" data-i="${i}" data-ids="${esc(ids)}" tabindex="0">${esc(text.slice(s.start, s.end))}</mark><sup>${noteNo(s.f.id)}</sup>`;
     pos = s.end;
   });
   html += esc(text.slice(pos));
-  const doc = $("#doc");
-  doc.innerHTML = html || '<span class="muted">(빈 글)</span>';
-  const pick = (e) => {
-    const mk = e.target.closest("mark");
-    if (!mk) return;
-    const s = state.spans[+mk.dataset.i];
-    selectFinding(s.f.id, s);
-  };
-  doc.onclick = pick;
-  doc.onkeydown = (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pick(e); } };
+  $("#doc").innerHTML = html;
 }
 
-function selectFinding(id, span = null) {
-  state.selected = id;
-  document.querySelectorAll("#doc mark").forEach((m) => {
-    const s = state.spans[+m.dataset.i];
-    const match = s.f.id === id || s.also.some((f) => f.id === id);
-    m.classList.toggle("dim", !match);
-    m.classList.toggle("active", span ? +m.dataset.i === state.spans.indexOf(span) : false);
+function renderNotes() {
+  const fs = state.result.findings;
+  $("#note-count").textContent = fs.length ? `${fs.length}건` : "";
+  $("#notes").innerHTML = fs.length ? fs.map((f, i) => `
+    <li class="note s${f.sev}${state.open === f.id ? " open" : ""}" data-f="${esc(f.id)}">
+      <button type="button" aria-expanded="${state.open === f.id}">
+        <span class="no">${i + 1}</span>
+        <span class="nm"><small>${esc(f.id)} · ${SEV[f.sev].key}${f.sev !== f.baseSev ? ` (빈도 ${f.count}회로 조정)` : ""}</small>${esc(f.name)}</span>
+        <span class="ct">×${f.count}</span>
+      </button>
+      <div class="note-body"><div>${noteBody(f)}</div></div>
+    </li>`).join("") : `<li class="empty">빨간 펜을 댈 곳이 없습니다.</li>`;
+}
+
+function noteBody(f) {
+  const s = state.here && (state.here.f.id === f.id || state.here.also.some((x) => x.id === f.id)) ? state.here : null;
+  let here = "";
+  if (s) {
+    here = `<p><b>이 자리</b><span class="here">「${esc(s.text)}」</span></p>`;
+    if (s.suggestion && s.f.id === f.id) here += `<p><b>고친 안 · ${esc(s.suggestion.kind)}</b></p>${baHtml(s.suggestion)}${toggleHtml(s.suggestion)}<p></p>`;
+  }
+  return `${here}<p><b>왜</b>${esc(f.why)}</p><p><b>처방</b>${esc(f.fix)}</p>`;
+}
+
+function baHtml(sg) { return `<div class="ba"><del>${esc(sg.before)}</del><ins>${esc(sg.after)}</ins></div>`; }
+function toggleHtml(sg) {
+  const key = `${sg.start}:${sg.end}`;
+  const on = state.applied.has(key);
+  return `<div class="toggle" data-k="${key}"><button type="button" data-v="1" aria-pressed="${on}">적용</button><button type="button" data-v="0" aria-pressed="${!on}">원문 유지</button></div>`;
+}
+
+function focusFinding(id, { scrollTo = false } = {}) {
+  $$("#doc mark").forEach((m) => m.classList.toggle("dim", id !== null && !m.dataset.ids.split(" ").includes(id)));
+  if (scrollTo && id) {
+    const first = $$("#doc mark").find((m) => m.dataset.ids.split(" ").includes(id));
+    if (first) {
+      const box = $("#doc");
+      box.scrollTo({ top: first.offsetTop - box.clientHeight / 3, behavior: reduced ? "auto" : "smooth" });
+    }
+  }
+}
+
+function openNote(id, span = null) {
+  state.open = state.open === id && !span ? null : id;
+  state.here = span;
+  $$("#doc mark").forEach((m) => m.classList.toggle("on", span ? +m.dataset.i === state.spans.indexOf(span) : false));
+  $$(".note").forEach((n) => {
+    const on = n.dataset.f === state.open;
+    n.classList.toggle("open", on);
+    $("button", n).setAttribute("aria-expanded", String(on));
+    if (n.dataset.f === id) $(".note-body > div", n).innerHTML = noteBody(state.result.findings.find((f) => f.id === id));
   });
-  document.querySelectorAll(".sig").forEach((el) => el.classList.toggle("active", el.dataset.f === id));
-  const f = state.result.findings.find((x) => x.id === id);
-  renderDetail(f, span);
-}
-
-function renderDetail(f, span = null) {
-  const el = $("#detail");
-  if (!f) {
-    el.innerHTML = `<p class="muted">하이라이트나 아래 신호 목록에서 항목을 고르세요.</p>`;
-    document.querySelectorAll("#doc mark").forEach((m) => m.classList.remove("dim", "active"));
-    return;
+  if (span) {
+    const n = $(`.note[data-f="${CSS.escape(id)}"]`);
+    const margin = $(".margin");
+    if (n && margin.scrollHeight > margin.clientHeight) margin.scrollTo({ top: n.offsetTop - 60, behavior: reduced ? "auto" : "smooth" });
   }
-  const sugg = span?.suggestion;
-  const others = span?.also?.length ? `<dt>같은 자리의 다른 신호</dt><dd>${span.also.map((x) => `${esc(x.id)} ${esc(x.name)}`).join(", ")}</dd>` : "";
-  const sample = span ? "" : f.spans.length
-    ? `<dt>나온 곳 (${f.count}회)</dt><dd>${f.spans.slice(0, 6).map((s) => `「${esc(s.text.length > 40 ? s.text.slice(0, 40) + "…" : s.text)}」`).join(" ")}</dd>`
-    : "";
-  let ba = "";
-  if (sugg) {
-    const key = `${sugg.start}:${sugg.end}`;
-    const on = state.applied.has(key);
-    ba = `<dt>고친 안 (${esc(sugg.kind)})</dt><dd><div class="ba"><span class="b">${esc(sugg.before)}</span><span class="a">${esc(sugg.after)}</span></div>
-      <div class="toggle" style="margin-top:8px" data-k="${key}"><button type="button" data-v="1" aria-pressed="${on}">적용</button><button type="button" data-v="0" aria-pressed="${!on}">원문 유지</button></div></dd>`;
-  }
-  el.innerHTML = `
-    <div><span class="pill s${f.sev}">${SEV[f.sev].key}</span><span class="id">${esc(f.id)} ${esc(f.name)}</span></div>
-    <div class="muted small">${esc(f.groupLabel)}${f.sev !== f.baseSev ? ` · 기본 ${SEV[f.baseSev].key}, 빈도 ${f.count}회로 조정` : ""}</div>
-    <dl>
-      ${span ? `<dt>이 자리</dt><dd>「${esc(span.text)}」</dd>` : ""}
-      <dt>왜 AI 같은가</dt><dd>${esc(f.why)}</dd>
-      <dt>처방</dt><dd>${esc(f.fix)}</dd>
-      ${ba}${sample}${others}
-    </dl>`;
-  el.querySelector(".toggle")?.addEventListener("click", onToggle);
 }
 
-// ── 신호 목록 ──────────────────────────────────────────────
-function renderSignals(r) {
-  const box = $("#signals");
-  if (!r.findings.length) { box.innerHTML = `<p class="empty">잡힌 신호가 없습니다.</p>`; return; }
-  box.innerHTML = [1, 2, 3].map((sev) => {
-    const list = r.findings.filter((f) => f.sev === sev);
-    if (!list.length) return "";
-    return `<div class="sig-group"><h3><span class="pill s${sev}">${SEV[sev].key}</span>${SEV[sev].label}</h3>` +
-      list.map((f) => `<div class="sig" data-f="${esc(f.id)}" tabindex="0" role="button">
-        <span class="t">${esc(f.id)} ${esc(f.name)}</span><span class="c">${f.count}회</span>
-        <span class="w">${esc(f.why)}</span></div>`).join("") + "</div>";
-  }).join("");
-  const pick = (e) => {
-    const el = e.target.closest(".sig");
-    if (!el) return;
-    selectFinding(el.dataset.f);
-    $("#doc").querySelector(`mark[data-f="${CSS.escape(el.dataset.f)}"]`)?.scrollIntoView({ block: "center", behavior: "smooth" });
-  };
-  box.onclick = pick;
-  box.onkeydown = (e) => { if (e.key === "Enter") pick(e); };
-}
-
-// ── 4. 고친 안 ─────────────────────────────────────────────
-function renderSuggestions() {
+// ── 05 고친 안 ─────────────────────────────────────────────
+function renderFixes() {
   const box = $("#suggestions");
-  if (!state.suggestions.length) {
-    box.innerHTML = `<p class="empty">기계적으로 바꿀 수 있는 후보가 없습니다. 신호 목록의 처방을 보고 수정본 칸에서 직접 고치세요.</p>`;
-    return;
-  }
-  box.innerHTML = state.suggestions.map((s) => {
-    const on = state.applied.has(s.key);
-    return `<div class="sugg">
-      <div><div class="meta"><span class="pill s${s.finding.sev}">${SEV[s.finding.sev].key}</span>${esc(s.finding.id)} ${esc(s.finding.name)} · ${esc(s.kind)}</div>
-        <div class="ba"><span class="b">${esc(s.before)}</span><span class="a">${esc(s.after)}</span></div></div>
-      <div class="toggle" data-k="${s.key}"><button type="button" data-v="1" aria-pressed="${on}">적용</button><button type="button" data-v="0" aria-pressed="${!on}">원문 유지</button></div>
-    </div>`;
-  }).join("");
-  box.onclick = onToggle;
+  box.innerHTML = state.suggestions.length ? state.suggestions.map((s, i) => `
+    <li class="fix${state.applied.has(s.key) ? " applied" : ""}" data-reveal style="--d:${Math.min(i, 6) * 0.04}s">
+      <span class="who"><b>${esc(s.finding.name)}</b>${esc(s.finding.id)} · ${esc(s.kind)}</span>
+      ${baHtml(s)}
+      ${toggleHtml(s)}
+    </li>`).join("")
+    : `<li class="empty" data-reveal>기계적으로 바꿀 후보가 없습니다. 여백 메모의 처방을 보고 오른쪽 칸에서 직접 고치세요.</li>`;
 }
 
-function onToggle(e) {
-  const b = e.target.closest(".toggle button");
-  if (!b) return;
-  const key = b.parentElement.dataset.k;
-  if (b.dataset.v === "1") state.applied.add(key); else state.applied.delete(key);
-  document.querySelectorAll(`.toggle[data-k="${key}"] button`).forEach((x) => x.setAttribute("aria-pressed", String(x.dataset.v === (b.dataset.v))));
+function setApplied(key, on) {
+  if (on) state.applied.add(key); else state.applied.delete(key);
+  $$(`.toggle[data-k="${key}"] button`).forEach((b) => b.setAttribute("aria-pressed", String((b.dataset.v === "1") === on)));
+  $$(".fix").forEach((li) => li.classList.toggle("applied", state.applied.has($(".toggle", li)?.dataset.k)));
   renderRevised();
 }
 
-function bulk(apply) {
-  state.applied = apply ? new Set(state.suggestions.map((s) => s.key)) : new Set();
-  renderSuggestions();
-  if (state.selected) {
-    const f = state.result.findings.find((x) => x.id === state.selected);
-    renderDetail(f);
-  }
-  renderRevised();
+function bulk(on) {
+  for (const s of state.suggestions) setApplied(s.key, on);
+  if (!state.suggestions.length) renderRevised();
 }
 
 function renderRevised() {
@@ -268,41 +235,100 @@ function renderRevised() {
     pos = s.end;
     lastEnd = s.end;
   }
-  html += esc(text.slice(pos));
-  $("#diff-before").innerHTML = html;
+  $("#diff-before").innerHTML = html + esc(text.slice(pos));
 }
 
-// ── 5. 2차 검수 ─────────────────────────────────────────────
+// ── 06 다시 검수 ───────────────────────────────────────────
 function recheck() {
   const revised = $("#revised").value;
-  if (!revised.trim()) { toast("수정본이 비어 있습니다"); return; }
+  if (!revised.trim()) { toast("교정본이 비어 있습니다"); return; }
   const after = analyze(revised, state.genre);
   const c = compare(state.result, after);
-  const box = $("#second-body");
-  const vs = `<div class="vs"><b>전</b> ${esc(c.before.label)} (밀도 ${c.before.per1k}) <span class="muted">→</span> <b>후</b> ${esc(c.after.label)} (밀도 ${c.after.per1k})</div>`;
-  const swaps = c.swaps.length
-    ? c.swaps.map((s) => `<div class="alert"><b>버릇 바꿔치기 의심</b> · ${esc(s.note)} <span class="muted small">(줄어든 것: ${s.fromHit.join(", ")} / 늘어난 것: ${s.toHit.join(", ")})</span></div>`).join("")
-    : `<div class="good">알려진 버릇 바꿔치기 패턴은 보이지 않습니다.</div>`;
-  const fresh = c.fresh.length
-    ? `<div class="alert"><b>새로 생긴 신호</b> · ${c.fresh.map((r) => `${esc(r.id)} ${esc(r.name)} ${r.after}회`).join(", ")}</div>` : "";
-  const rows = c.rows.length ? `<table><thead><tr><th>신호</th><th class="num">전</th><th class="num">후</th><th class="num">변화</th></tr></thead><tbody>` +
-    c.rows.map((r) => {
-      const d = r.after - r.before;
-      return `<tr><td>${esc(r.id)} ${esc(r.name)}</td><td class="num">${r.before}</td><td class="num">${r.after}</td><td class="num ${d > 0 ? "up" : d < 0 ? "down" : ""}">${d > 0 ? "+" : ""}${d}</td></tr>`;
-    }).join("") + "</tbody></table>" : `<p class="empty">전후 모두 신호가 없습니다.</p>`;
-  box.innerHTML = vs + swaps + fresh + rows +
-    `<div class="row end gap"><button class="primary" id="adopt" type="button">수정본을 입력창으로 옮겨 다시 진단</button></div>`;
+  const alerts = [
+    ...c.swaps.map((s) => `<div class="alert"><b>바꿔치기 의심</b>${esc(s.note)}<small>줄어든 신호 ${s.fromHit.join(", ")}, 늘어난 신호 ${s.toHit.join(", ")}</small></div>`),
+    ...(c.fresh.length ? [`<div class="alert"><b>새로 생김</b>${c.fresh.map((r) => `${esc(r.id)} ${esc(r.name)} ${r.after}회`).join(", ")}</div>`] : []),
+  ];
+  if (!alerts.length) alerts.push(`<div class="alert ok"><b>이상 없음</b>알려진 바꿔치기 패턴은 보이지 않습니다.</div>`);
+  const rows = c.rows.map((r) => {
+    const d = r.after - r.before;
+    return `<tr><td><small>${esc(r.id)}</small>${esc(r.name)}</td><td class="n">${r.before}</td><td class="n">${r.after}</td><td class="d ${d > 0 ? "up" : d < 0 ? "down" : ""}">${d > 0 ? "+" : ""}${d}</td></tr>`;
+  }).join("");
+  $("#second-body").innerHTML = `
+    <div class="vs" data-reveal>
+      <div class="side"><small>교정 전</small><b>${c.before.per1k}</b><span>${esc(c.before.label)}</span></div>
+      <span class="arrow">→</span>
+      <div class="side"><small>교정 후</small><b>${c.after.per1k}</b><span>${esc(c.after.label)}</span></div>
+    </div>
+    <div class="alerts" data-reveal>${alerts.join("")}</div>
+    ${rows ? `<table class="delta" data-reveal><tbody>${rows}</tbody></table>` : ""}
+    <div class="actions" data-reveal><button class="btn" id="adopt" type="button"><span>교정본으로 다시 시작</span><i aria-hidden="true">↺</i></button></div>`;
   $("#second").hidden = false;
-  $("#adopt").onclick = () => { $("#src").value = revised; updateCount(); run(); };
-  $("#second").scrollIntoView({ behavior: "smooth", block: "start" });
+  $("#adopt").onclick = () => {
+    $("#src").value = revised;
+    updateCount();
+    $("#manuscript").scrollIntoView({ behavior: reduced ? "auto" : "smooth" });
+    run({ scroll: false });
+  };
+  observe();
+  $("#second").scrollIntoView({ behavior: reduced ? "auto" : "smooth" });
 }
 
-// ── 읽기 체크리스트 ─────────────────────────────────────────
-function renderReadOnly() {
-  $("#readonly").innerHTML = READ_ONLY.map((r, i) => `<li><input type="checkbox" id="ro${i}"><label for="ro${i}"><b>${esc(r.id)} ${esc(r.name)}</b>${r.sev === 1 ? ' <span class="pill s1">S1</span>' : ""}<div class="d">${esc(r.desc)} → ${esc(r.fix)}</div></label></li>`).join("");
+// ── 07 ─────────────────────────────────────────────────────
+function renderChecks() {
+  $("#readonly").innerHTML = READ_ONLY.map((r, i) => `<li data-reveal style="--d:${i * 0.04}s"><label>
+    <input type="checkbox"><span><b><small>${esc(r.id)}</small>${esc(r.name)}</b><p>${esc(r.desc)}. ${esc(r.fix)}.</p></span></label></li>`).join("");
 }
 
-// ── 유틸 ───────────────────────────────────────────────────
+// ── 연출 ───────────────────────────────────────────────────
+let io;
+function observe() {
+  if (reduced || !("IntersectionObserver" in window)) { $$("[data-reveal]").forEach((el) => el.classList.add("in")); fillBars(); return; }
+  io ||= new IntersectionObserver((entries) => {
+    for (const e of entries) if (e.isIntersecting) {
+      e.target.classList.add("in");
+      $$(".cbar i", e.target).forEach((b) => { b.style.width = `${b.dataset.w}%`; });
+      io.unobserve(e.target);
+    }
+  }, { rootMargin: "0px 0px -8% 0px", threshold: 0.08 });
+  $$("[data-reveal]:not(.in)").forEach((el) => io.observe(el));
+}
+function fillBars() { $$(".cbar i").forEach((b) => { b.style.width = `${b.dataset.w}%`; }); }
+
+function parallax() {
+  if (reduced) return;
+  const word = $(".hero-word");
+  let ticking = false;
+  addEventListener("scroll", () => {
+    if (ticking) return;
+    ticking = true;
+    requestAnimationFrame(() => {
+      const y = scrollY;
+      if (y < innerHeight * 1.2) word.style.transform = `translate3d(${y * -0.12}px, ${y * 0.22}px, 0)`;
+      ticking = false;
+    });
+  }, { passive: true });
+}
+
+function cursor() {
+  if (!matchMedia("(pointer: fine)").matches || reduced) return;
+  const c = $(".cursor");
+  let x = -100, y = -100, cx = x, cy = y;
+  addEventListener("pointermove", (e) => {
+    x = e.clientX; y = e.clientY;
+    c.classList.add("on");
+    const t = e.target;
+    c.classList.toggle("text", !!t.closest("textarea"));
+    c.classList.toggle("big", !t.closest("textarea") && !!t.closest("a, button, mark, label, summary"));
+  }, { passive: true });
+  document.addEventListener("pointerleave", () => c.classList.remove("on"));
+  const loop = () => {
+    cx += (x - cx) * 0.2; cy += (y - cy) * 0.2;
+    c.style.transform = `translate3d(${cx}px, ${cy}px, 0)`;
+    requestAnimationFrame(loop);
+  };
+  loop();
+}
+
 let toastTimer;
 function toast(msg) {
   const t = $("#toast");
@@ -317,12 +343,72 @@ async function copy(text, done) {
   catch {
     const ta = document.createElement("textarea");
     ta.value = text; document.body.appendChild(ta); ta.select();
-    try { document.execCommand("copy"); toast(done); } catch { toast("복사하지 못했습니다. 직접 선택해 복사하세요"); }
+    try { document.execCommand("copy"); toast(done); } catch { toast("복사하지 못했습니다"); }
     ta.remove();
   }
 }
 
-// ── 초기화 ─────────────────────────────────────────────────
+// ── 이벤트 ─────────────────────────────────────────────────
+function bind() {
+  $("#genre").addEventListener("click", (e) => {
+    const b = e.target.closest("button");
+    if (!b) return;
+    state.genre = b.dataset.g;
+    renderGenre();
+    updateCount();
+    if (state.result) run({ scroll: false });
+  });
+  $("#samples").addEventListener("click", (e) => {
+    const b = e.target.closest("button");
+    if (!b) return;
+    const s = SAMPLES.find((x) => x.id === b.dataset.s);
+    $("#src").value = s.text;
+    state.genre = s.genre;
+    renderGenre();
+    updateCount();
+  });
+  $("#src").addEventListener("input", updateCount);
+  $("#src").addEventListener("keydown", (e) => { if ((e.ctrlKey || e.metaKey) && e.key === "Enter") run(); });
+  $("#run").addEventListener("click", () => run());
+  $("#clear").addEventListener("click", () => { $("#src").value = ""; updateCount(); $("#results").hidden = true; $("#src").focus(); });
+
+  const doc = $("#doc");
+  const pickMark = (e) => {
+    const m = e.target.closest("mark");
+    if (!m) return;
+    const s = state.spans[+m.dataset.i];
+    openNote(s.f.id, s);
+    focusFinding(s.f.id);
+  };
+  doc.addEventListener("click", pickMark);
+  doc.addEventListener("keydown", (e) => { if (e.key === "Enter") pickMark(e); });
+  doc.addEventListener("mouseover", (e) => { const m = e.target.closest("mark"); if (m && !state.open) focusFinding(m.dataset.ids.split(" ")[0]); });
+  doc.addEventListener("mouseleave", () => { if (!state.open) focusFinding(null); });
+
+  const notes = $("#notes");
+  notes.addEventListener("click", (e) => {
+    if (e.target.closest(".toggle")) return;
+    const b = e.target.closest(".note > button");
+    if (!b) return;
+    const id = b.parentElement.dataset.f;
+    openNote(id);
+    focusFinding(state.open, { scrollTo: !!state.open });
+  });
+  notes.addEventListener("mouseover", (e) => { const n = e.target.closest(".note"); if (n && !state.open) focusFinding(n.dataset.f); });
+  notes.addEventListener("mouseleave", () => { if (!state.open) focusFinding(null); });
+
+  document.addEventListener("click", (e) => {
+    const b = e.target.closest(".toggle button");
+    if (!b) return;
+    setApplied(b.parentElement.dataset.k, b.dataset.v === "1");
+  });
+  $("#all-apply").addEventListener("click", () => bulk(true));
+  $("#all-keep").addEventListener("click", () => bulk(false));
+  $("#recheck").addEventListener("click", recheck);
+  $("#copy-revised").addEventListener("click", () => copy($("#revised").value, "교정본을 복사했습니다"));
+  $("#copy-prompt").addEventListener("click", () => copy($("#prompt").textContent, "프롬프트를 복사했습니다"));
+}
+
 function init() {
   try {
     const saved = JSON.parse(localStorage.getItem(STORE) || "null");
@@ -331,15 +417,11 @@ function init() {
   renderGenre();
   renderSamples();
   updateCount();
-  $("#src").addEventListener("input", updateCount);
-  $("#src").addEventListener("keydown", (e) => { if ((e.ctrlKey || e.metaKey) && e.key === "Enter") run(); });
-  $("#run").onclick = run;
-  $("#clear").onclick = () => { $("#src").value = ""; updateCount(); $("#results").hidden = true; $("#src").focus(); };
-  $("#all-apply").onclick = () => bulk(true);
-  $("#all-keep").onclick = () => bulk(false);
-  $("#recheck").onclick = recheck;
-  $("#copy-revised").onclick = () => copy($("#revised").value, "수정본을 복사했습니다");
-  $("#copy-prompt").onclick = () => copy($("#prompt").textContent, "프롬프트를 복사했습니다");
+  bind();
+  observe();
+  parallax();
+  cursor();
+  requestAnimationFrame(() => document.documentElement.classList.add("is-loaded"));
 }
 
 init();
